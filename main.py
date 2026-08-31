@@ -20,15 +20,20 @@ def make_participant_list():
     if current_part is None:
         return "📋 **대내 모집이 시작되지 않았습니다.**"
 
-    text = f"🔥 **{current_part}부 대내**\n\n📋 **참여 명단**\n"
+    lines = [
+        f"🔥 **{current_part}부 대내**",
+        "",
+        "📋 **참여 명단**",
+        ""
+    ]
 
     if not participants:
-        text += "현재 참여자가 없습니다."
+        lines.append("현재 참여자가 없습니다.")
     else:
         for i, user in enumerate(participants, 1):
-            text += f"{i}. {user['name']}\n"
+            lines.append(f"{i}. {user['name']}")
 
-    return text
+    return "\n".join(lines)
 
 
 async def update_participant_message(channel):
@@ -62,12 +67,13 @@ async def on_message(message):
 
     content = message.content.strip()
 
-    # 운영진: 1부 / 2부 / 3부 ...
+    # 운영진이 1부 / 2부 / 3부 ... 입력
     if content.endswith("부"):
         part_text = content[:-1].strip()
 
         if part_text.isdigit():
 
+            # 메시지 관리 권한이 있는 운영진만 가능
             if not message.author.guild_permissions.manage_messages:
                 try:
                     await message.delete()
@@ -80,7 +86,7 @@ async def on_message(message):
                 await notice.delete(delay=3)
                 return
 
-            # 기존 명단 메시지 삭제
+            # 기존 참여 명단 메시지 삭제
             if participant_message:
                 try:
                     await participant_message.delete()
@@ -89,7 +95,7 @@ async def on_message(message):
 
                 participant_message = None
 
-            # 새로운 부 시작
+            # 새 부 시작 + 명단 초기화
             current_part = part_text
             participants.clear()
 
@@ -118,6 +124,7 @@ async def on_message(message):
 
         user_id = message.author.id
 
+        # 중복 참여 방지
         if any(user["id"] == user_id for user in participants):
             try:
                 await message.delete()
@@ -147,7 +154,6 @@ async def on_message(message):
     if content == "취소":
 
         user_id = message.author.id
-
         found = None
 
         for user in participants:
@@ -188,6 +194,7 @@ async def on_message(message):
 
         # 고정 메시지는 남기고 나머지 전부 삭제
         async for msg in message.channel.history(limit=None):
+
             if msg.pinned:
                 continue
 
