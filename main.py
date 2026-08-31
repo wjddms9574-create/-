@@ -62,9 +62,7 @@ async def on_message(message):
 
     content = message.content.strip()
 
-    # ==========================
     # 운영진: 1부 / 2부 / 3부 ...
-    # ==========================
     if content.endswith("부"):
         part_text = content[:-1].strip()
 
@@ -82,15 +80,16 @@ async def on_message(message):
                 await notice.delete(delay=3)
                 return
 
-            # 기존 명단 삭제
+            # 기존 명단 메시지 삭제
             if participant_message:
                 try:
                     await participant_message.delete()
                 except:
                     pass
+
                 participant_message = None
 
-            # 새 부 시작
+            # 새로운 부 시작
             current_part = part_text
             participants.clear()
 
@@ -102,9 +101,7 @@ async def on_message(message):
             await update_participant_message(message.channel)
             return
 
-    # ==========================
     # 참여
-    # ==========================
     if content == "참여":
 
         if current_part is None:
@@ -146,9 +143,7 @@ async def on_message(message):
         await update_participant_message(message.channel)
         return
 
-    # ==========================
     # 취소
-    # ==========================
     if content == "취소":
 
         user_id = message.author.id
@@ -177,9 +172,7 @@ async def on_message(message):
         await update_participant_message(message.channel)
         return
 
-    # ==========================
     # 클린
-    # ==========================
     if content == "클린":
 
         if not message.author.guild_permissions.manage_messages:
@@ -193,7 +186,7 @@ async def on_message(message):
         current_part = None
         participant_message = None
 
-        # 고정 메시지는 남기고 전부 삭제
+        # 고정 메시지는 남기고 나머지 전부 삭제
         async for msg in message.channel.history(limit=None):
             if msg.pinned:
                 continue
