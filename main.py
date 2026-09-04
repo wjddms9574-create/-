@@ -92,6 +92,25 @@ def user_exists(user_id):
 
 
 # =========================
+# 실제 닉네임 부분만 추출
+# =========================
+
+def get_base_name(member):
+    display_name = member.display_name.strip()
+
+    # 앞의 [M], [R], [S] 제거
+    for tag in ["[M]", "[R]", "[S]"]:
+        if display_name.startswith(tag):
+            display_name = display_name[len(tag):].strip()
+            break
+
+    # "/" 앞부분만 실제 닉네임으로 사용
+    base_name = display_name.split("/")[0].strip()
+
+    return base_name
+
+
+# =========================
 # 닉네임 일부 검색
 # =========================
 
@@ -105,15 +124,14 @@ def find_member_by_name(guild, name):
         if member.bot:
             continue
 
-        display_name = member.display_name.lower()
-        username = member.name.lower()
+        base_name = get_base_name(member).lower()
 
-        # 완전히 일치하는 경우 최우선
-        if target_name == display_name or target_name == username:
+        # 정확히 일치
+        if target_name == base_name:
             exact_matches.append(member)
 
-        # 닉네임 일부가 포함된 경우
-        elif target_name in display_name or target_name in username:
+        # 일부 포함
+        elif target_name in base_name:
             partial_matches.append(member)
 
     if len(exact_matches) == 1:
@@ -138,7 +156,7 @@ def find_member_by_name(guild, name):
 async def handle_search_error(channel, name, error, matches):
     if error == "not_found":
         notice = await channel.send(
-            f"⚠️ `{name}`이 포함된 닉네임을 찾을 수 없습니다."
+            f"⚠️ `{name}` 닉네임을 찾을 수 없습니다."
         )
         await notice.delete(delay=5)
         return True
@@ -211,7 +229,6 @@ async def on_message(message):
                 await notice.delete(delay=3)
                 return
 
-            # 기존 명단 메시지 삭제
             if participant_message:
                 try:
                     await participant_message.delete()
@@ -226,7 +243,6 @@ async def on_message(message):
             participants = waiting.copy()
             waiting.clear()
 
-            # 혹시 대기자가 12명보다 많으면 다시 대기자로 분리
             if len(participants) > MAX_PARTICIPANTS:
                 waiting = participants[MAX_PARTICIPANTS:]
                 participants = participants[:MAX_PARTICIPANTS]
@@ -330,7 +346,7 @@ async def on_message(message):
             await notice.delete(delay=3)
             return
 
-        # 현재 부에서 빠졌으면 대기 1번 자동 승급
+        # 현재 부에서 빠지면 대기 1번 자동 승급
         if removed_from_main and waiting:
             participants.append(waiting.pop(0))
 
@@ -390,7 +406,7 @@ async def on_message(message):
 
         if not removed:
             notice = await message.channel.send(
-                f"⚠️ {target.display_name}님은 명단에 없습니다."
+                f"⚠️ {get_base_name(target)}님은 명단에 없습니다."
             )
             await notice.delete(delay=3)
             return
@@ -445,7 +461,7 @@ async def on_message(message):
 
         if user_exists(target.id):
             notice = await message.channel.send(
-                f"⚠️ {target.display_name}님은 이미 등록되어 있습니다."
+                f"⚠️ {get_base_name(target)}님은 이미 등록되어 있습니다."
             )
             await notice.delete(delay=3)
             return
@@ -568,7 +584,6 @@ async def on_message(message):
         return
 
 
-    # 기존 !! 명령어도 처리
     await bot.process_commands(message)
 
 
