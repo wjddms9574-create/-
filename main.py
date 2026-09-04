@@ -8,12 +8,17 @@ from discord.ext import commands
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!!", intents=intents)
 
 participants = []
+waiting = []
+
 participant_message = None
 current_part = None
+
+MAX_PARTICIPANTS = 12
 
 
 def make_participant_list():
@@ -31,6 +36,16 @@ def make_participant_list():
         lines.append("현재 참여자가 없습니다.")
     else:
         for i, user in enumerate(participants, 1):
+            lines.append(f"{i}. {user['name']}")
+
+    if waiting:
+        lines.extend([
+            "",
+            "⏳ **다음 부 대기**",
+            ""
+        ])
+
+        for i, user in enumerate(waiting, 1):
             lines.append(f"{i}. {user['name']}")
 
     return "\n".join(lines)
@@ -51,6 +66,34 @@ async def update_participant_message(channel):
     participant_message = await channel.send(text)
 
 
+def user_exists(user_id):
+    return (
+        any(user["id"] == user_id for user in participants)
+        or any(user["id"] == user_id for user in waiting)
+    )
+
+
+def find_member_by_name(guild, name):
+    target_name = name.strip().lower()
+
+    matches = []
+
+    for member in guild.members:
+        display_name = member.display_name.lower()
+        username = member.name.lower()
+
+        if target_name == display_name or target_name == username:
+            matches.append(member)
+
+    if len(matches) == 1:
+        return matches[0], None
+
+    if len(matches) == 0:
+        return None, "not_found"
+
+    return None, "duplicate"
+
+
 @bot.event
 async def on_ready():
     print(f"{bot.user} 로그인 완료!")
@@ -59,6 +102,7 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     global participants
+    global waiting
     global participant_message
     global current_part
 
@@ -85,7 +129,6 @@ async def on_message(message):
                 await notice.delete(delay=3)
                 return
 
-            # 기존 명단 삭제
             if participant_message:
                 try:
                     await participant_message.delete()
@@ -94,9 +137,14 @@ async def on_message(message):
 
                 participant_message = None
 
-            # 새 부 시작
             current_part = part_text
-            participants.clear()
+
+            participants = waiting.copy()
+            waiting.clear()
+
+            if len(participants) > MAX_PARTICIPANTS:
+                waiting = participants[MAX_PARTICIPANTS:]
+                participants = participants[:MAX_PARTICIPANTS]
 
             try:
                 await message.delete()
@@ -106,7 +154,7 @@ async def on_message(message):
             await update_participant_message(message.channel)
             return
 
-    # 참여
+    # 참여 / 참가
     if content in ["참여", "참가"]:
 
         if current_part is None:
@@ -123,22 +171,27 @@ async def on_message(message):
 
         user_id = message.author.id
 
-        if any(user["id"] == user_id for user in participants):
+        if user_exists(user_id):
             try:
                 await message.delete()
             except:
                 pass
 
             notice = await message.channel.send(
-                f"⚠️ {message.author.display_name}님은 이미 참여했습니다."
+                f"⚠️ {message.author.display_name}님은 이미 등록되어 있습니다."
             )
             await notice.delete(delay=3)
             return
 
-        participants.append({
+        user_data = {
             "id": user_id,
             "name": message.author.display_name
-        })
+        }
+
+        if len(participants) < MAX_PARTICIPANTS:
+            participants.append(user_data)
+        else:
+            waiting.append(user_data)
 
         try:
             await message.delete()
@@ -148,30 +201,153 @@ async def on_message(message):
         await update_participant_message(message.channel)
         return
 
-    # 취소
+    # 본인 취소
     if content == "취소":
 
         user_id = message.author.id
-        found = None
+        removed = False
 
         for user in participants:
             if user["id"] == user_id:
-                found = user
+                participants.remove(user)
+                removed = True
                 break
+
+        if not removed:
+            for user in waiting:
+                if user["id"] == user_id:
+                    waiting.remove(user)
+                    removed = True
+                    break
 
         try:
             await message.delete()
         except:
             pass
 
-        if found is None:
+        if not removed:
             notice = await message.channel.send(
-                f"⚠️ {message.author.display_name}님은 참여하지 않았습니다."
+                f"⚠️ {message.author.display_name}님은 등록되어 있지 않습니다."
             )
             await notice.delete(delay=3)
             return
 
-        participants.remove(found)
+        if len(participants) < MAX_PARTICIPANTS and waiting:
+            participants.append(waiting.pop(0))
+
+        await update_participant_message(message.channel)
+        return
+
+    # 운영진: 불참 닉네임
+    if content.startswith("불참 "):
+
+        if not message.author.guild_permissions.manage_messages:
+            notice = await message.channel.send(
+                "❌ 운영진만 사용할 수 있습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        name = content[3:].strip()
+
+        target, error = find_member_by_name(message.guild, name)
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        if error == "not_found":
+            notice = await message.channel.send(
+                f"⚠️ `{name}` 닉네임을 찾을 수 없습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        if error == "duplicate":
+            notice = await message.channel.send(
+                f"⚠️ `{name}`과 같은 닉네임이 여러 명 있습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        removed = False
+
+        for user in participants:
+            if user["id"] == target.id:
+                participants.remove(user)
+                removed = True
+                break
+
+        if not removed:
+            for user in waiting:
+                if user["id"] == target.id:
+                    waiting.remove(user)
+                    removed = True
+                    break
+
+        if not removed:
+            notice = await message.channel.send(
+                f"⚠️ {target.display_name}님은 명단에 없습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        if len(participants) < MAX_PARTICIPANTS and waiting:
+            participants.append(waiting.pop(0))
+
+        await update_participant_message(message.channel)
+        return
+
+    # 운영진: 추가 닉네임
+    if content.startswith("추가 "):
+
+        if not message.author.guild_permissions.manage_messages:
+            notice = await message.channel.send(
+                "❌ 운영진만 사용할 수 있습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        name = content[3:].strip()
+
+        target, error = find_member_by_name(message.guild, name)
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        if error == "not_found":
+            notice = await message.channel.send(
+                f"⚠️ `{name}` 닉네임을 찾을 수 없습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        if error == "duplicate":
+            notice = await message.channel.send(
+                f"⚠️ `{name}`과 같은 닉네임이 여러 명 있습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        if user_exists(target.id):
+            notice = await message.channel.send(
+                f"⚠️ {target.display_name}님은 이미 등록되어 있습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        user_data = {
+            "id": target.id,
+            "name": target.display_name
+        }
+
+        if len(participants) < MAX_PARTICIPANTS:
+            participants.append(user_data)
+        else:
+            waiting.append(user_data)
 
         await update_participant_message(message.channel)
         return
@@ -192,11 +368,6 @@ async def on_message(message):
             return
 
         if current_part is None:
-            try:
-                await message.delete()
-            except:
-                pass
-
             notice = await message.channel.send(
                 "⚠️ 현재 모집 중인 대내가 없습니다."
             )
@@ -204,18 +375,12 @@ async def on_message(message):
             return
 
         if not participants:
-            try:
-                await message.delete()
-            except:
-                pass
-
             notice = await message.channel.send(
                 "⚠️ 현재 참여자가 없습니다."
             )
             await notice.delete(delay=3)
             return
 
-        # "집합" 뒤에 적은 시간 가져오기
         gather_time = content[2:].strip()
 
         try:
@@ -238,7 +403,6 @@ async def on_message(message):
             f"{mentions}\n\n"
             f"🔔 **{current_part}부 대내 참여자분들 {gather_time}까지 집합해주세요!**"
         )
-
         return
 
     # 클린
@@ -252,12 +416,11 @@ async def on_message(message):
             return
 
         participants.clear()
+        waiting.clear()
         current_part = None
         participant_message = None
 
-        # 고정 메시지는 남기고 나머지 전부 삭제
         async for msg in message.channel.history(limit=None):
-
             if msg.pinned:
                 continue
 
