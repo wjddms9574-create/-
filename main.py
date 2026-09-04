@@ -107,7 +107,7 @@ async def on_message(message):
             return
 
     # 참여
-    if content == "참여":
+    if content in ["참여", "참가"]:
 
         if current_part is None:
             try:
