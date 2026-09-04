@@ -67,13 +67,12 @@ async def on_message(message):
 
     content = message.content.strip()
 
-    # 운영진이 1부 / 2부 / 3부 ... 입력
+    # 운영진: 1부 / 2부 / 3부 ...
     if content.endswith("부"):
         part_text = content[:-1].strip()
 
         if part_text.isdigit():
 
-            # 메시지 관리 권한이 있는 운영진만 가능
             if not message.author.guild_permissions.manage_messages:
                 try:
                     await message.delete()
@@ -86,7 +85,7 @@ async def on_message(message):
                 await notice.delete(delay=3)
                 return
 
-            # 기존 참여 명단 메시지 삭제
+            # 기존 명단 삭제
             if participant_message:
                 try:
                     await participant_message.delete()
@@ -95,7 +94,7 @@ async def on_message(message):
 
                 participant_message = None
 
-            # 새 부 시작 + 명단 초기화
+            # 새 부 시작
             current_part = part_text
             participants.clear()
 
@@ -124,7 +123,6 @@ async def on_message(message):
 
         user_id = message.author.id
 
-        # 중복 참여 방지
         if any(user["id"] == user_id for user in participants):
             try:
                 await message.delete()
@@ -176,6 +174,71 @@ async def on_message(message):
         participants.remove(found)
 
         await update_participant_message(message.channel)
+        return
+
+    # 집합 + 시간
+    if content.startswith("집합"):
+
+        if not message.author.guild_permissions.manage_messages:
+            try:
+                await message.delete()
+            except:
+                pass
+
+            notice = await message.channel.send(
+                "❌ 운영진만 집합 알림을 보낼 수 있습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        if current_part is None:
+            try:
+                await message.delete()
+            except:
+                pass
+
+            notice = await message.channel.send(
+                "⚠️ 현재 모집 중인 대내가 없습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        if not participants:
+            try:
+                await message.delete()
+            except:
+                pass
+
+            notice = await message.channel.send(
+                "⚠️ 현재 참여자가 없습니다."
+            )
+            await notice.delete(delay=3)
+            return
+
+        # "집합" 뒤에 적은 시간 가져오기
+        gather_time = content[2:].strip()
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        if not gather_time:
+            notice = await message.channel.send(
+                "⚠️ 시간을 같이 적어주세요. 예: `집합 10시 30분`"
+            )
+            await notice.delete(delay=5)
+            return
+
+        mentions = " ".join(
+            f"<@{user['id']}>" for user in participants
+        )
+
+        await message.channel.send(
+            f"{mentions}\n\n"
+            f"🔔 **{current_part}부 대내 참여자분들 {gather_time}까지 집합해주세요!**"
+        )
+
         return
 
     # 클린
