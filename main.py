@@ -18,11 +18,18 @@ bot = commands.Bot(command_prefix="!!", intents=intents)
 
 MAX_PARTICIPANTS = 12
 
+# 운영진 역할 이름
+# 디스코드 역할 이름이 정확히 "운영진"이어야 함
+STAFF_ROLE_NAME = "운영진"
+
 participants = []
 waiting = []
 
 participant_message = None
 current_part = None
+
+# 12명 모집 완료 알림을 이미 보냈는지
+full_notification_sent = False
 
 
 # =========================
@@ -80,6 +87,62 @@ async def update_participant_message(channel):
 
 
 # =========================
+# 운영진 역할 찾기
+# =========================
+
+def get_staff_role(guild):
+    return discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
+
+
+# =========================
+# 12명 모집 상태 확인
+# =========================
+
+async def check_full_status(channel):
+    global full_notification_sent
+
+    count = len(participants)
+    staff_role = get_staff_role(channel.guild)
+
+    if staff_role:
+        staff_mention = staff_role.mention
+    else:
+        staff_mention = "**운영진**"
+
+    # 12명이 처음 된 순간
+    if count == MAX_PARTICIPANTS and not full_notification_sent:
+
+        full_notification_sent = True
+
+        await channel.send(
+            f"{staff_mention}\n\n"
+            f"✅ **{current_part}부 인원 모집 완료!**\n"
+            f"집합 시간을 정해주세요.",
+            allowed_mentions=discord.AllowedMentions(
+                roles=True,
+                users=False,
+                everyone=False
+            )
+        )
+
+    # 12명이었다가 11명으로 줄어든 경우
+    elif count == MAX_PARTICIPANTS - 1 and full_notification_sent:
+
+        full_notification_sent = False
+
+        await channel.send(
+            f"{staff_mention}\n\n"
+            f"⚠️ **{current_part}부 참여자 한 명이 빠졌습니다.**\n"
+            f"현재 인원: **{count}/{MAX_PARTICIPANTS}명**",
+            allowed_mentions=discord.AllowedMentions(
+                roles=True,
+                users=False,
+                everyone=False
+            )
+        )
+
+
+# =========================
 # 이미 등록된 사람인지 확인
 # =========================
 
@@ -104,7 +167,7 @@ def get_base_name(member):
             display_name = display_name[len(tag):].strip()
             break
 
-    # "/" 앞부분만 실제 닉네임으로 사용
+    # "/" 앞부분까지만 실제 닉네임으로 사용
     base_name = display_name.split("/")[0].strip()
 
     return base_name
@@ -198,6 +261,7 @@ async def on_message(message):
     global waiting
     global participant_message
     global current_part
+    global full_notification_sent
 
     if message.author.bot:
         return
@@ -229,6 +293,7 @@ async def on_message(message):
                 await notice.delete(delay=3)
                 return
 
+            # 기존 명단 메시지 삭제
             if participant_message:
                 try:
                     await participant_message.delete()
@@ -239,10 +304,14 @@ async def on_message(message):
 
             current_part = part_text
 
+            # 새로운 부가 열렸으므로 알림 상태 초기화
+            full_notification_sent = False
+
             # 이전 부 대기자 → 새 부 참여자로 이동
             participants = waiting.copy()
             waiting.clear()
 
+            # 12명 초과 시 다시 대기로 분리
             if len(participants) > MAX_PARTICIPANTS:
                 waiting = participants[MAX_PARTICIPANTS:]
                 participants = participants[:MAX_PARTICIPANTS]
@@ -253,6 +322,10 @@ async def on_message(message):
                 pass
 
             await update_participant_message(message.channel)
+
+            # 대기자가 넘어오면서 바로 12명이 된 경우도 확인
+            await check_full_status(message.channel)
+
             return
 
 
@@ -307,6 +380,10 @@ async def on_message(message):
             pass
 
         await update_participant_message(message.channel)
+
+        # 12명 모집 완료 여부 확인
+        await check_full_status(message.channel)
+
         return
 
 
@@ -346,11 +423,15 @@ async def on_message(message):
             await notice.delete(delay=3)
             return
 
-        # 현재 부에서 빠지면 대기 1번 자동 승급
+        # 대기자가 있으면 현재 부 빈자리로 자동 승급
         if removed_from_main and waiting:
             participants.append(waiting.pop(0))
 
         await update_participant_message(message.channel)
+
+        # 인원 변동 확인
+        await check_full_status(message.channel)
+
         return
 
 
@@ -411,11 +492,15 @@ async def on_message(message):
             await notice.delete(delay=3)
             return
 
-        # 현재 부에서 빠지면 대기 1번 자동 승급
+        # 대기 1번이 있으면 빈자리로 자동 이동
         if removed_from_main and waiting:
             participants.append(waiting.pop(0))
 
         await update_participant_message(message.channel)
+
+        # 인원 변동 확인
+        await check_full_status(message.channel)
+
         return
 
 
@@ -477,6 +562,10 @@ async def on_message(message):
             waiting.append(user_data)
 
         await update_participant_message(message.channel)
+
+        # 추가 명령으로 12명이 된 경우도 확인
+        await check_full_status(message.channel)
+
         return
 
 
@@ -532,7 +621,7 @@ async def on_message(message):
         if not gather_time:
             notice = await message.channel.send(
                 "⚠️ 시간을 같이 적어주세요.\n"
-                "예: `집합 10시 30분`"
+                "예: `집합 20:30`"
             )
             await notice.delete(delay=5)
             return
@@ -569,6 +658,7 @@ async def on_message(message):
 
         current_part = None
         participant_message = None
+        full_notification_sent = False
 
         # 고정 메시지는 유지
         async for msg in message.channel.history(limit=None):
