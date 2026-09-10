@@ -631,12 +631,24 @@ async def on_message(message):
             for user in participants
         )
 
+        # 참여자 멘션 전송
+        mention_message = await message.channel.send(
+            mentions,
+            allowed_mentions=discord.AllowedMentions(
+                users=True,
+                roles=False,
+                everyone=False
+            )
+        )
+
+        # 멘션 메시지는 5초 뒤 자동 삭제
+        await mention_message.delete(delay=5)
+
+        # 집합 안내 메시지는 계속 유지
         await message.channel.send(
-    f"{mentions}\n\n"
-    f"🔔 **{current_part}부 대내**\n"
-    f"      **{gather_time}까지**\n"
-    f"      **대내 대기방에 집합해주세요!**"
-)
+            f"🔔 **{current_part}부 대내**\n"
+            f"     **{gather_time}까지**\n"
+            f"     **대내 대기방에 집합해주세요!**"
         )
 
         return
