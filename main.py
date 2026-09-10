@@ -646,10 +646,10 @@ async def on_message(message):
 
         # 집합 안내 메시지는 계속 유지
         await message.channel.send(
-            f"🔔 **{current_part}부 대내**\n"
-            f"     **{gather_time}까지**\n"
-            f"     **대내 대기방에 집합해주세요!**"
-        )
+    f"🔔 **{current_part}부 대내**\n"
+    f"       **{gather_time}까지**\n"
+    f"       **대내 대기방에 집합해주세요!**"
+)
 
         return
 
