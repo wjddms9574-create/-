@@ -666,7 +666,7 @@ async def on_message(message):
                 "`참여` 또는 `참가`\n"
                 "→ 대내 참여\n\n"
                 "`취소`\n"
-                "→ 본인 참여 취소"
+                "→ 본인 참여 취소\n\n\n"
             ),
             inline=False
         )
@@ -685,7 +685,7 @@ async def on_message(message):
                 "`사다리`\n"
                 "→ 사다리타기 실행\n\n"
                 "`클린`\n"
-                "→ 채팅 및 모집 초기화"
+                "→ 채팅 및 모집 초기화\n\n\n"
             ),
             inline=False
         )
