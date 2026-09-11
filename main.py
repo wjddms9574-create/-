@@ -3,6 +3,9 @@ load_dotenv()
 
 import os
 import random
+import json
+from datetime import datetime
+
 import discord
 from discord.ext import commands
 
@@ -15,6 +18,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
 intents.members = True
+intents.reactions = True
 
 bot = commands.Bot(
     command_prefix="!!",
@@ -22,8 +26,6 @@ bot = commands.Bot(
 )
 
 MAX_PARTICIPANTS = 12
-
-# 디스코드의 실제 운영진 역할 이름과 똑같아야 함
 STAFF_ROLE_NAME = "운영진"
 
 participants = []
@@ -32,8 +34,146 @@ waiting = []
 participant_message = None
 current_part = None
 
-# 12명 모집 완료 알림 중복 방지
 full_notification_sent = False
+recruitment_was_full = False
+
+
+# ==================================================
+# 투표 설정
+# ==================================================
+
+POLL_FILE = "poll_state.json"
+
+POLL_R = "🇷"
+POLL_S = "🇸"
+POLL_M = "🇲"
+
+poll_state = {}
+
+
+def load_poll_state():
+
+    global poll_state
+
+    try:
+
+        with open(
+            POLL_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            poll_state = json.load(f)
+
+    except (
+        FileNotFoundError,
+        json.JSONDecodeError
+    ):
+
+        poll_state = {}
+
+
+def save_poll_state():
+
+    with open(
+        POLL_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            poll_state,
+            f,
+            ensure_ascii=False,
+            indent=4
+        )
+
+
+load_poll_state()
+
+
+# ==================================================
+# 투표 날짜 입력
+# ==================================================
+
+def parse_poll_datetime(text):
+
+    formats = [
+        "%Y-%m-%d %H:%M",
+        "%Y.%m.%d %H:%M",
+        "%Y/%m/%d %H:%M"
+    ]
+
+    for fmt in formats:
+
+        try:
+
+            return datetime.strptime(
+                text,
+                fmt
+            )
+
+        except ValueError:
+            pass
+
+    return None
+
+
+# ==================================================
+# 투표 날짜 표시
+#
+# 예:
+# 2026.08.29(토) 22:30
+# ==================================================
+
+def format_poll_datetime(dt):
+
+    korean_days = [
+        "월",
+        "화",
+        "수",
+        "목",
+        "금",
+        "토",
+        "일"
+    ]
+
+    day_name = korean_days[
+        dt.weekday()
+    ]
+
+    return (
+        f"{dt.year}."
+        f"{dt.month:02d}."
+        f"{dt.day:02d}"
+        f"({day_name}) "
+        f"{dt.hour:02d}:"
+        f"{dt.minute:02d}"
+    )
+
+
+# ==================================================
+# 투표 메시지
+# ==================================================
+
+def make_poll_embed(date_text):
+
+    embed = discord.Embed(
+        description=(
+            f"**{date_text} 참가자 명단**\n\n"
+            f"라플 참가자 {POLL_R} / "
+            f"스나 참가자 {POLL_S} / "
+            f"멀티 참가자 {POLL_M} "
+            f"체크 부탁드립니다\n\n"
+            f"*인원제한 없습니다 3항목중 하나만 선택해주세요*\n"
+            f"용병을 제외한 나머지는 본인 아이디로 참가하셔야 합니다.\n"
+            f"세트 인원이 있을 시 이벤트 채널에 "
+            f"세트인원 아이디 작성하여 남겨주세요!"
+        ),
+        color=discord.Color.red()
+    )
+
+    return embed
 
 
 # ==================================================
@@ -43,7 +183,10 @@ full_notification_sent = False
 def make_participant_list():
 
     if current_part is None:
-        return "📋 **대내 모집이 시작되지 않았습니다.**"
+
+        return (
+            "📋 **대내 모집이 시작되지 않았습니다.**"
+        )
 
     lines = [
         f"🔥 **{current_part}부 대내**",
@@ -53,15 +196,22 @@ def make_participant_list():
     ]
 
     if not participants:
-        lines.append("현재 참여자가 없습니다.")
+
+        lines.append(
+            "현재 참여자가 없습니다."
+        )
 
     else:
-        for i, user in enumerate(participants, 1):
+
+        for i, user in enumerate(
+            participants,
+            1
+        ):
+
             lines.append(
                 f"{i}. {user['name']}"
             )
 
-    # 13번부터 다음 부 대기
     if waiting:
 
         lines.extend([
@@ -70,7 +220,11 @@ def make_participant_list():
             ""
         ])
 
-        for i, user in enumerate(waiting, 1):
+        for i, user in enumerate(
+            waiting,
+            1
+        ):
+
             lines.append(
                 f"{i}. {user['name']}"
             )
@@ -79,7 +233,7 @@ def make_participant_list():
 
 
 # ==================================================
-# 명단 업데이트
+# 참여 명단 업데이트
 # ==================================================
 
 async def update_participant_message(channel):
@@ -91,15 +245,18 @@ async def update_participant_message(channel):
     if participant_message:
 
         try:
+
             await participant_message.edit(
                 content=text
             )
+
             return
 
         except (
             discord.NotFound,
             discord.HTTPException
         ):
+
             participant_message = None
 
     participant_message = await channel.send(
@@ -120,31 +277,46 @@ def get_staff_role(guild):
 
 
 # ==================================================
-# 12명 모집 상태 확인
+# 12명 모집 상태
 # ==================================================
 
-async def check_full_status(channel):
+async def check_full_status(
+    channel,
+    announce_drop=True
+):
 
     global full_notification_sent
+    global recruitment_was_full
 
-    count = len(participants)
+    count = len(
+        participants
+    )
 
     staff_role = get_staff_role(
         channel.guild
     )
 
     if staff_role:
-        staff_mention = staff_role.mention
+
+        staff_mention = (
+            staff_role.mention
+        )
+
     else:
-        staff_mention = "**운영진**"
+
+        staff_mention = (
+            "**운영진**"
+        )
 
     # 12명 되는 순간
     if (
         count == MAX_PARTICIPANTS
-        and not full_notification_sent
+        and
+        not full_notification_sent
     ):
 
         full_notification_sent = True
+        recruitment_was_full = True
 
         await channel.send(
             f"{staff_mention}\n\n"
@@ -160,25 +332,29 @@ async def check_full_status(channel):
     # 12명 → 11명
     elif (
         count == MAX_PARTICIPANTS - 1
-        and full_notification_sent
+        and
+        full_notification_sent
     ):
 
         full_notification_sent = False
 
-        await channel.send(
-            f"{staff_mention}\n\n"
-            f"⚠️ **{current_part}부 참여자 한 명이 빠졌습니다.**\n"
-            f"현재 인원: **{count}/{MAX_PARTICIPANTS}명**",
-            allowed_mentions=discord.AllowedMentions(
-                roles=True,
-                users=False,
-                everyone=False
+        if announce_drop:
+
+            await channel.send(
+                f"{staff_mention}\n\n"
+                f"⚠️ **{current_part}부 참여자 한 명이 빠졌습니다.**\n"
+                f"현재 인원: "
+                f"**{count}/{MAX_PARTICIPANTS}명**",
+                allowed_mentions=discord.AllowedMentions(
+                    roles=True,
+                    users=False,
+                    everyone=False
+                )
             )
-        )
 
 
 # ==================================================
-# 이미 등록된 사람인지 확인
+# 중복 참여 확인
 # ==================================================
 
 def user_exists(user_id):
@@ -197,14 +373,7 @@ def user_exists(user_id):
 
 
 # ==================================================
-# 실제 닉네임만 추출
-#
-# 예:
-# [R] 치/여운영진/27
-# → 치
-#
-# [S] 용병A/용병/차엽
-# → 용병A
+# 기본 닉네임 추출
 # ==================================================
 
 def get_base_name(member):
@@ -219,11 +388,14 @@ def get_base_name(member):
         "[S]"
     ]:
 
-        if display_name.startswith(tag):
+        if display_name.startswith(
+            tag
+        ):
 
             display_name = (
-                display_name[len(tag):]
-                .strip()
+                display_name[
+                    len(tag):
+                ].strip()
             )
 
             break
@@ -236,7 +408,7 @@ def get_base_name(member):
 
 
 # ==================================================
-# 닉네임 부분 검색
+# 닉네임 검색
 # ==================================================
 
 def find_member_by_name(
@@ -257,8 +429,9 @@ def find_member_by_name(
             continue
 
         base_name = (
-            get_base_name(member)
-            .lower()
+            get_base_name(
+                member
+            ).lower()
         )
 
         if target_name == base_name:
@@ -274,6 +447,7 @@ def find_member_by_name(
             )
 
     if len(exact_matches) == 1:
+
         return (
             exact_matches[0],
             None,
@@ -281,6 +455,7 @@ def find_member_by_name(
         )
 
     if len(exact_matches) > 1:
+
         return (
             None,
             "duplicate",
@@ -288,6 +463,7 @@ def find_member_by_name(
         )
 
     if len(partial_matches) == 1:
+
         return (
             partial_matches[0],
             None,
@@ -295,6 +471,7 @@ def find_member_by_name(
         )
 
     if len(partial_matches) == 0:
+
         return (
             None,
             "not_found",
@@ -309,7 +486,7 @@ def find_member_by_name(
 
 
 # ==================================================
-# 닉네임 검색 오류 안내
+# 닉네임 검색 오류
 # ==================================================
 
 async def handle_search_error(
@@ -340,8 +517,7 @@ async def handle_search_error(
         )
 
         notice = await channel.send(
-            f"⚠️ `{name}`으로 여러 명이 "
-            f"검색됐습니다.\n\n"
+            f"⚠️ `{name}`으로 여러 명이 검색됐습니다.\n\n"
             f"{names}\n\n"
             f"조금 더 구체적으로 입력해주세요."
         )
@@ -356,7 +532,7 @@ async def handle_search_error(
 
 
 # ==================================================
-# 사다리 - 입력창
+# 사다리 입력창
 # ==================================================
 
 class LadderInputModal(
@@ -370,8 +546,11 @@ class LadderInputModal(
     ):
 
         if side == "left":
+
             title = "왼쪽 항목 입력"
+
         else:
+
             title = "오른쪽 항목 입력"
 
         super().__init__(
@@ -407,8 +586,11 @@ class LadderInputModal(
         interaction
     ):
 
-        # 운영진만
-        if not interaction.user.guild_permissions.manage_messages:
+        if not (
+            interaction.user
+            .guild_permissions
+            .manage_messages
+        ):
 
             await interaction.response.send_message(
                 "❌ 운영진만 사용할 수 있습니다.",
@@ -419,8 +601,9 @@ class LadderInputModal(
 
         values = [
             item.strip()
-            for item in
-            self.items.value.split("\n")
+            for item in self.items.value.split(
+                "\n"
+            )
             if item.strip()
         ]
 
@@ -452,7 +635,7 @@ class LadderInputModal(
 
 
 # ==================================================
-# 사다리 - 버튼
+# 사다리 버튼
 # ==================================================
 
 class LadderView(
@@ -473,11 +656,14 @@ class LadderView(
         interaction
     ):
 
-        if not interaction.user.guild_permissions.manage_messages:
+        if not (
+            interaction.user
+            .guild_permissions
+            .manage_messages
+        ):
 
             await interaction.response.send_message(
-                "❌ 운영진만 사다리 기능을 "
-                "사용할 수 있습니다.",
+                "❌ 운영진만 사다리 기능을 사용할 수 있습니다.",
                 ephemeral=True
             )
 
@@ -500,6 +686,7 @@ class LadderView(
         if not await self.check_admin(
             interaction
         ):
+
             return
 
         await interaction.response.send_modal(
@@ -524,6 +711,7 @@ class LadderView(
         if not await self.check_admin(
             interaction
         ):
+
             return
 
         await interaction.response.send_modal(
@@ -548,6 +736,7 @@ class LadderView(
         if not await self.check_admin(
             interaction
         ):
+
             return
 
         if (
@@ -557,8 +746,7 @@ class LadderView(
         ):
 
             await interaction.response.send_message(
-                "⚠️ 왼쪽과 오른쪽 항목을 "
-                "먼저 입력해주세요.",
+                "⚠️ 왼쪽과 오른쪽 항목을 먼저 입력해주세요.",
                 ephemeral=True
             )
 
@@ -598,13 +786,11 @@ class LadderView(
                 f"**{left}** → **{right}**"
             )
 
-        result_text = "\n".join(
-            result_lines
-        )
-
         embed = discord.Embed(
             title="🪜 사다리타기 결과",
-            description=result_text,
+            description="\n".join(
+                result_lines
+            ),
             color=discord.Color.red()
         )
 
@@ -614,7 +800,7 @@ class LadderView(
 
 
 # ==================================================
-# 로그인
+# 봇 준비 완료
 # ==================================================
 
 @bot.event
@@ -623,6 +809,123 @@ async def on_ready():
     print(
         f"{bot.user} 로그인 완료!"
     )
+
+
+# ==================================================
+# 투표 반응
+#
+# R / S / M 중 하나만 선택
+# ==================================================
+
+@bot.event
+async def on_raw_reaction_add(
+    payload
+):
+
+    if bot.user is None:
+        return
+
+    if payload.user_id == bot.user.id:
+        return
+
+    if not poll_state:
+        return
+
+    try:
+
+        poll_message_id = int(
+            poll_state.get(
+                "message_id",
+                0
+            )
+        )
+
+    except:
+        return
+
+    if (
+        payload.message_id
+        !=
+        poll_message_id
+    ):
+
+        return
+
+    emoji = str(
+        payload.emoji
+    )
+
+    valid_emojis = [
+        POLL_R,
+        POLL_S,
+        POLL_M
+    ]
+
+    if emoji not in valid_emojis:
+        return
+
+    guild = bot.get_guild(
+        payload.guild_id
+    )
+
+    if guild is None:
+        return
+
+    member = payload.member
+
+    if member is None:
+
+        try:
+
+            member = await guild.fetch_member(
+                payload.user_id
+            )
+
+        except:
+            return
+
+    channel = guild.get_channel(
+        payload.channel_id
+    )
+
+    if channel is None:
+
+        try:
+
+            channel = await bot.fetch_channel(
+                payload.channel_id
+            )
+
+        except:
+            return
+
+    try:
+
+        poll_message = (
+            await channel.fetch_message(
+                payload.message_id
+            )
+        )
+
+    except:
+        return
+
+    # 자신이 누른 항목 제외
+    # 나머지 두 개 자동 제거
+    for other_emoji in valid_emojis:
+
+        if other_emoji == emoji:
+            continue
+
+        try:
+
+            await poll_message.remove_reaction(
+                other_emoji,
+                member
+            )
+
+        except:
+            pass
 
 
 # ==================================================
@@ -637,6 +940,8 @@ async def on_message(message):
     global participant_message
     global current_part
     global full_notification_sent
+    global recruitment_was_full
+    global poll_state
 
     if message.author.bot:
         return
@@ -665,6 +970,7 @@ async def on_message(message):
             value=(
                 "`참여` 또는 `참가`\n"
                 "→ 대내 참여\n\n"
+
                 "`취소`\n"
                 "→ 본인 참여 취소\n\n\n"
             ),
@@ -676,14 +982,28 @@ async def on_message(message):
             value=(
                 "`1부`, `2부`, `3부`\n"
                 "→ 해당 부 모집 시작\n\n"
+
                 "`추가 닉네임`\n"
-                "→ 인원 직접 추가\n\n"
+                "→ 해당 인원 직접 추가\n\n"
+
                 "`불참 닉네임`\n"
-                "→ 인원 직접 제외\n\n"
+                "→ 해당 인원 직접 제외\n\n"
+
                 "`집합 20:30`\n"
                 "→ 참여자 호출 + 집합 안내\n\n"
+
                 "`사다리`\n"
                 "→ 사다리타기 실행\n\n"
+
+                "`대내투표 2026-08-29 22:30`\n"
+                "→ 라플 / 스나 / 멀티 투표 생성\n\n"
+
+                "`투표수정 2026-10-03 22:30`\n"
+                "→ 투표 날짜·시간만 수정\n\n"
+
+                "`투표초기화`\n"
+                "→ 기존 투표 전부 초기화\n\n"
+
                 "`클린`\n"
                 "→ 채팅 및 모집 초기화\n\n\n"
             ),
@@ -695,7 +1015,7 @@ async def on_message(message):
             value=(
                 "1~12번 → 현재 부 참여\n"
                 "13번부터 → 다음 부 대기\n"
-                "다음 부 시작 시 대기자 자동 이동\n"
+                "다음 부 시작 시 대기 인원 자동 이동\n"
                 "12명 모집 완료 시 운영진 자동 알림"
             ),
             inline=False
@@ -709,16 +1029,427 @@ async def on_message(message):
 
 
     # ==================================================
+    # 대내투표 생성
+    #
+    # 예:
+    # 대내투표 2026-08-29 22:30
+    # ==================================================
+
+    if content.startswith(
+        "대내투표 "
+    ):
+
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
+
+            notice = (
+                await message.channel.send(
+                    "❌ 운영진만 투표를 생성할 수 있습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        date_input = (
+            content[
+                len("대내투표 "):
+            ].strip()
+        )
+
+        poll_datetime = (
+            parse_poll_datetime(
+                date_input
+            )
+        )
+
+        if poll_datetime is None:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 날짜와 시간을 이렇게 입력해주세요.\n"
+                    "`대내투표 2026-08-29 22:30`"
+                )
+            )
+
+            await notice.delete(
+                delay=7
+            )
+
+            return
+
+        date_text = (
+            format_poll_datetime(
+                poll_datetime
+            )
+        )
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        poll_message = (
+            await message.channel.send(
+                embed=make_poll_embed(
+                    date_text
+                )
+            )
+        )
+
+        await poll_message.add_reaction(
+            POLL_R
+        )
+
+        await poll_message.add_reaction(
+            POLL_S
+        )
+
+        await poll_message.add_reaction(
+            POLL_M
+        )
+
+        poll_state = {
+
+            "guild_id":
+                message.guild.id,
+
+            "channel_id":
+                message.channel.id,
+
+            "message_id":
+                poll_message.id,
+
+            "date":
+                poll_datetime.strftime(
+                    "%Y-%m-%d %H:%M"
+                )
+        }
+
+        save_poll_state()
+
+        return
+
+
+    # ==================================================
+    # 투표수정
+    #
+    # 날짜/시간만 변경
+    # 기존 투표 유지
+    # ==================================================
+
+    if content.startswith(
+        "투표수정 "
+    ):
+
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
+
+            notice = (
+                await message.channel.send(
+                    "❌ 운영진만 투표를 수정할 수 있습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if not poll_state:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 수정할 대내투표가 없습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=5
+            )
+
+            return
+
+        date_input = (
+            content[
+                len("투표수정 "):
+            ].strip()
+        )
+
+        poll_datetime = (
+            parse_poll_datetime(
+                date_input
+            )
+        )
+
+        if poll_datetime is None:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 이렇게 입력해주세요.\n"
+                    "`투표수정 2026-10-03 22:30`"
+                )
+            )
+
+            await notice.delete(
+                delay=7
+            )
+
+            return
+
+        try:
+
+            channel_id = int(
+                poll_state[
+                    "channel_id"
+                ]
+            )
+
+            message_id = int(
+                poll_state[
+                    "message_id"
+                ]
+            )
+
+            poll_channel = (
+                bot.get_channel(
+                    channel_id
+                )
+            )
+
+            if poll_channel is None:
+
+                poll_channel = (
+                    await bot.fetch_channel(
+                        channel_id
+                    )
+                )
+
+            poll_message = (
+                await poll_channel.fetch_message(
+                    message_id
+                )
+            )
+
+        except:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 기존 투표 메시지를 찾을 수 없습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=5
+            )
+
+            return
+
+        date_text = (
+            format_poll_datetime(
+                poll_datetime
+            )
+        )
+
+        # 날짜/시간만 변경
+        # 반응은 그대로 유지
+        await poll_message.edit(
+            embed=make_poll_embed(
+                date_text
+            )
+        )
+
+        poll_state["date"] = (
+            poll_datetime.strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        )
+
+        save_poll_state()
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        notice = (
+            await message.channel.send(
+                "✅ 투표 날짜와 시간을 수정했습니다."
+            )
+        )
+
+        await notice.delete(
+            delay=3
+        )
+
+        return
+
+
+    # ==================================================
+    # 투표초기화
+    #
+    # 날짜는 그대로
+    # 기존 사람들이 누른 R/S/M만 모두 삭제
+    # ==================================================
+
+    if content == "투표초기화":
+
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
+
+            notice = (
+                await message.channel.send(
+                    "❌ 운영진만 투표를 초기화할 수 있습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if not poll_state:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 초기화할 대내투표가 없습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=5
+            )
+
+            return
+
+        try:
+
+            channel_id = int(
+                poll_state[
+                    "channel_id"
+                ]
+            )
+
+            message_id = int(
+                poll_state[
+                    "message_id"
+                ]
+            )
+
+            poll_channel = (
+                bot.get_channel(
+                    channel_id
+                )
+            )
+
+            if poll_channel is None:
+
+                poll_channel = (
+                    await bot.fetch_channel(
+                        channel_id
+                    )
+                )
+
+            poll_message = (
+                await poll_channel.fetch_message(
+                    message_id
+                )
+            )
+
+        except:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 기존 투표 메시지를 찾을 수 없습니다."
+                )
+            )
+
+            await notice.delete(
+                delay=5
+            )
+
+            return
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        # 기존 반응 전부 삭제
+        try:
+
+            await poll_message.clear_reactions()
+
+        except:
+
+            notice = (
+                await message.channel.send(
+                    "⚠️ 투표 반응을 삭제하지 못했습니다.\n"
+                    "봇의 `메시지 관리` 권한을 확인해주세요."
+                )
+            )
+
+            await notice.delete(
+                delay=5
+            )
+
+            return
+
+        # 새 R / S / M 반응 다시 생성
+        await poll_message.add_reaction(
+            POLL_R
+        )
+
+        await poll_message.add_reaction(
+            POLL_S
+        )
+
+        await poll_message.add_reaction(
+            POLL_M
+        )
+
+        notice = (
+            await message.channel.send(
+                "✅ 투표가 초기화되었습니다.\n"
+                "🇷 라플 / 🇸 스나 / 🇲 멀티를 다시 선택해주세요."
+            )
+        )
+
+        await notice.delete(
+            delay=5
+        )
+
+        return
+
+
+    # ==================================================
     # 사다리
     # ==================================================
 
     if content == "사다리":
 
-        if not message.author.guild_permissions.manage_messages:
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
 
             notice = await message.channel.send(
-                "❌ 운영진만 사다리 기능을 "
-                "사용할 수 있습니다."
+                "❌ 운영진만 사다리 기능을 사용할 수 있습니다."
             )
 
             await notice.delete(
@@ -754,7 +1485,9 @@ async def on_message(message):
     # 1부 / 2부 / 3부 ...
     # ==================================================
 
-    if content.endswith("부"):
+    if content.endswith(
+        "부"
+    ):
 
         part_text = (
             content[:-1].strip()
@@ -762,16 +1495,21 @@ async def on_message(message):
 
         if part_text.isdigit():
 
-            if not message.author.guild_permissions.manage_messages:
+            if not (
+                message.author
+                .guild_permissions
+                .manage_messages
+            ):
 
                 try:
                     await message.delete()
                 except:
                     pass
 
-                notice = await message.channel.send(
-                    "❌ 운영진만 대내 모집을 "
-                    "시작할 수 있습니다."
+                notice = (
+                    await message.channel.send(
+                        "❌ 운영진만 대내 모집을 시작할 수 있습니다."
+                    )
                 )
 
                 await notice.delete(
@@ -783,7 +1521,9 @@ async def on_message(message):
             if participant_message:
 
                 try:
+
                     await participant_message.delete()
+
                 except:
                     pass
 
@@ -793,11 +1533,9 @@ async def on_message(message):
                 part_text
             )
 
-            full_notification_sent = (
-                False
-            )
+            full_notification_sent = False
+            recruitment_was_full = False
 
-            # 이전 부 대기자 자동 이동
             participants = (
                 waiting.copy()
             )
@@ -854,9 +1592,10 @@ async def on_message(message):
             except:
                 pass
 
-            notice = await message.channel.send(
-                "⚠️ 아직 대내 모집이 "
-                "시작되지 않았습니다."
+            notice = (
+                await message.channel.send(
+                    "⚠️ 아직 대내 모집이 시작되지 않았습니다."
+                )
             )
 
             await notice.delete(
@@ -878,9 +1617,11 @@ async def on_message(message):
             except:
                 pass
 
-            notice = await message.channel.send(
-                f"⚠️ {message.author.display_name}님은 "
-                f"이미 등록되어 있습니다."
+            notice = (
+                await message.channel.send(
+                    f"⚠️ {message.author.display_name}님은 "
+                    f"이미 등록되어 있습니다."
+                )
             )
 
             await notice.delete(
@@ -890,8 +1631,12 @@ async def on_message(message):
             return
 
         user_data = {
-            "id": user_id,
-            "name": message.author.display_name
+
+            "id":
+                user_id,
+
+            "name":
+                message.author.display_name
         }
 
         if (
@@ -939,9 +1684,15 @@ async def on_message(message):
         removed = False
         removed_from_main = False
 
+        removed_name = (
+            message.author.display_name
+        )
+
         for user in participants:
 
-            if user["id"] == user_id:
+            if user[
+                "id"
+            ] == user_id:
 
                 participants.remove(
                     user
@@ -956,7 +1707,9 @@ async def on_message(message):
 
             for user in waiting:
 
-                if user["id"] == user_id:
+                if user[
+                    "id"
+                ] == user_id:
 
                     waiting.remove(
                         user
@@ -973,9 +1726,11 @@ async def on_message(message):
 
         if not removed:
 
-            notice = await message.channel.send(
-                f"⚠️ {message.author.display_name}님은 "
-                f"등록되어 있지 않습니다."
+            notice = (
+                await message.channel.send(
+                    f"⚠️ {message.author.display_name}님은 "
+                    f"등록되어 있지 않습니다."
+                )
             )
 
             await notice.delete(
@@ -984,7 +1739,6 @@ async def on_message(message):
 
             return
 
-        # 대기 1번 자동 승급
         if (
             removed_from_main
             and
@@ -999,9 +1753,28 @@ async def on_message(message):
             message.channel
         )
 
-        await check_full_status(
-            message.channel
-        )
+        if (
+            recruitment_was_full
+            and
+            removed_from_main
+        ):
+
+            await message.channel.send(
+                f"⚠️ **{removed_name}님이 참여를 취소했습니다.**\n"
+                f"현재 인원: "
+                f"**{len(participants)}/{MAX_PARTICIPANTS}명**"
+            )
+
+            await check_full_status(
+                message.channel,
+                announce_drop=False
+            )
+
+        else:
+
+            await check_full_status(
+                message.channel
+            )
 
         return
 
@@ -1010,12 +1783,20 @@ async def on_message(message):
     # 불참 닉네임
     # ==================================================
 
-    if content.startswith("불참 "):
+    if content.startswith(
+        "불참 "
+    ):
 
-        if not message.author.guild_permissions.manage_messages:
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
 
-            notice = await message.channel.send(
-                "❌ 운영진만 사용할 수 있습니다."
+            notice = (
+                await message.channel.send(
+                    "❌ 운영진만 사용할 수 있습니다."
+                )
             )
 
             await notice.delete(
@@ -1046,6 +1827,7 @@ async def on_message(message):
             error,
             matches
         ):
+
             return
 
         removed = False
@@ -1053,7 +1835,9 @@ async def on_message(message):
 
         for user in participants:
 
-            if user["id"] == target.id:
+            if user[
+                "id"
+            ] == target.id:
 
                 participants.remove(
                     user
@@ -1068,7 +1852,9 @@ async def on_message(message):
 
             for user in waiting:
 
-                if user["id"] == target.id:
+                if user[
+                    "id"
+                ] == target.id:
 
                     waiting.remove(
                         user
@@ -1080,9 +1866,11 @@ async def on_message(message):
 
         if not removed:
 
-            notice = await message.channel.send(
-                f"⚠️ {get_base_name(target)}님은 "
-                f"명단에 없습니다."
+            notice = (
+                await message.channel.send(
+                    f"⚠️ {get_base_name(target)}님은 "
+                    f"명단에 없습니다."
+                )
             )
 
             await notice.delete(
@@ -1116,12 +1904,20 @@ async def on_message(message):
     # 추가 닉네임
     # ==================================================
 
-    if content.startswith("추가 "):
+    if content.startswith(
+        "추가 "
+    ):
 
-        if not message.author.guild_permissions.manage_messages:
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
 
-            notice = await message.channel.send(
-                "❌ 운영진만 사용할 수 있습니다."
+            notice = (
+                await message.channel.send(
+                    "❌ 운영진만 사용할 수 있습니다."
+                )
             )
 
             await notice.delete(
@@ -1132,9 +1928,11 @@ async def on_message(message):
 
         if current_part is None:
 
-            notice = await message.channel.send(
-                "⚠️ 먼저 `1부`, `2부` 등으로 "
-                "모집을 시작해주세요."
+            notice = (
+                await message.channel.send(
+                    "⚠️ 먼저 `1부`, `2부` 등으로 "
+                    "모집을 시작해주세요."
+                )
             )
 
             await notice.delete(
@@ -1165,15 +1963,18 @@ async def on_message(message):
             error,
             matches
         ):
+
             return
 
         if user_exists(
             target.id
         ):
 
-            notice = await message.channel.send(
-                f"⚠️ {get_base_name(target)}님은 "
-                f"이미 등록되어 있습니다."
+            notice = (
+                await message.channel.send(
+                    f"⚠️ {get_base_name(target)}님은 "
+                    f"이미 등록되어 있습니다."
+                )
             )
 
             await notice.delete(
@@ -1183,8 +1984,12 @@ async def on_message(message):
             return
 
         user_data = {
-            "id": target.id,
-            "name": target.display_name
+
+            "id":
+                target.id,
+
+            "name":
+                target.display_name
         }
 
         if (
@@ -1215,25 +2020,32 @@ async def on_message(message):
 
 
     # ==================================================
-    # 집합 + 시간
+    # 집합
     # ==================================================
 
     if (
         content == "집합"
         or
-        content.startswith("집합 ")
+        content.startswith(
+            "집합 "
+        )
     ):
 
-        if not message.author.guild_permissions.manage_messages:
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
 
             try:
                 await message.delete()
             except:
                 pass
 
-            notice = await message.channel.send(
-                "❌ 운영진만 집합 알림을 "
-                "보낼 수 있습니다."
+            notice = (
+                await message.channel.send(
+                    "❌ 운영진만 집합 알림을 보낼 수 있습니다."
+                )
             )
 
             await notice.delete(
@@ -1249,8 +2061,10 @@ async def on_message(message):
             except:
                 pass
 
-            notice = await message.channel.send(
-                "⚠️ 현재 모집 중인 대내가 없습니다."
+            notice = (
+                await message.channel.send(
+                    "⚠️ 현재 모집 중인 대내가 없습니다."
+                )
             )
 
             await notice.delete(
@@ -1266,8 +2080,10 @@ async def on_message(message):
             except:
                 pass
 
-            notice = await message.channel.send(
-                "⚠️ 현재 참여자가 없습니다."
+            notice = (
+                await message.channel.send(
+                    "⚠️ 현재 참여자가 없습니다."
+                )
             )
 
             await notice.delete(
@@ -1287,9 +2103,11 @@ async def on_message(message):
 
         if not gather_time:
 
-            notice = await message.channel.send(
-                "⚠️ 시간을 같이 적어주세요.\n"
-                "예: `집합 20:30`"
+            notice = (
+                await message.channel.send(
+                    "⚠️ 시간을 같이 적어주세요.\n"
+                    "예: `집합 20:30`"
+                )
             )
 
             await notice.delete(
@@ -1303,22 +2121,21 @@ async def on_message(message):
             for user in participants
         )
 
-        # 참여자 전원 멘션
-        mention_message = await message.channel.send(
-            mentions,
-            allowed_mentions=discord.AllowedMentions(
-                users=True,
-                roles=False,
-                everyone=False
+        mention_message = (
+            await message.channel.send(
+                mentions,
+                allowed_mentions=discord.AllowedMentions(
+                    users=True,
+                    roles=False,
+                    everyone=False
+                )
             )
         )
 
-        # 멘션 메시지는 5초 뒤 삭제
         await mention_message.delete(
             delay=5
         )
 
-        # 집합 안내는 계속 남김
         await message.channel.send(
             f"🔔 **{current_part}부 대내**\n"
             f"       **{gather_time}까지**\n"
@@ -1334,10 +2151,16 @@ async def on_message(message):
 
     if content == "클린":
 
-        if not message.author.guild_permissions.manage_messages:
+        if not (
+            message.author
+            .guild_permissions
+            .manage_messages
+        ):
 
-            notice = await message.channel.send(
-                "❌ 메시지 관리 권한이 필요합니다."
+            notice = (
+                await message.channel.send(
+                    "❌ 메시지 관리 권한이 필요합니다."
+                )
             )
 
             await notice.delete(
@@ -1351,13 +2174,16 @@ async def on_message(message):
 
         current_part = None
         participant_message = None
-        full_notification_sent = False
 
-        async for msg in message.channel.history(
-            limit=None
+        full_notification_sent = False
+        recruitment_was_full = False
+
+        async for msg in (
+            message.channel.history(
+                limit=None
+            )
         ):
 
-            # 고정 메시지는 유지
             if msg.pinned:
                 continue
 
@@ -1387,7 +2213,7 @@ async def 테스트(ctx):
 
 
 # ==================================================
-# Discord 토큰
+# 토큰
 # ==================================================
 
 token = os.getenv(
