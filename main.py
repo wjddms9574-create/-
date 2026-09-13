@@ -57,6 +57,188 @@ recruitment_was_full = False
 
 
 # ==================================================
+# 모집 상태 저장
+# Restart 후에도 현재 모집 유지
+# ==================================================
+
+RECRUITMENT_FILE = "recruitment_state.json"
+
+recruitment_state = {}
+
+
+def load_recruitment_state():
+
+    global recruitment_state
+    global participants
+    global waiting
+    global current_part
+    global full_notification_sent
+    global recruitment_was_full
+
+    try:
+
+        with open(
+            RECRUITMENT_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            recruitment_state = json.load(f)
+
+    except (
+        FileNotFoundError,
+        json.JSONDecodeError
+    ):
+
+        recruitment_state = {}
+
+        return
+
+
+    participants = recruitment_state.get(
+        "participants",
+        []
+    )
+
+    waiting = recruitment_state.get(
+        "waiting",
+        []
+    )
+
+    current_part = recruitment_state.get(
+        "current_part",
+        None
+    )
+
+    full_notification_sent = recruitment_state.get(
+        "full_notification_sent",
+        False
+    )
+
+    recruitment_was_full = recruitment_state.get(
+        "recruitment_was_full",
+        False
+    )
+
+
+def save_recruitment_state(guild=None):
+
+    global recruitment_state
+
+    old_guild_id = recruitment_state.get(
+        "guild_id"
+    )
+
+    old_channel_id = recruitment_state.get(
+        "channel_id"
+    )
+
+    old_message_id = recruitment_state.get(
+        "message_id"
+    )
+
+
+    guild_id = old_guild_id
+    channel_id = old_channel_id
+    message_id = old_message_id
+
+
+    if guild is not None:
+
+        guild_id = guild.id
+
+
+    if participant_message is not None:
+
+        channel_id = (
+            participant_message.channel.id
+        )
+
+        message_id = (
+            participant_message.id
+        )
+
+
+    recruitment_state = {
+
+        "guild_id":
+            guild_id,
+
+        "channel_id":
+            channel_id,
+
+        "message_id":
+            message_id,
+
+        "current_part":
+            current_part,
+
+        "participants":
+            participants,
+
+        "waiting":
+            waiting,
+
+        "full_notification_sent":
+            full_notification_sent,
+
+        "recruitment_was_full":
+            recruitment_was_full
+    }
+
+
+    with open(
+        RECRUITMENT_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            recruitment_state,
+            f,
+            ensure_ascii=False,
+            indent=4
+        )
+
+
+def clear_recruitment_state():
+
+    global recruitment_state
+
+    recruitment_state = {
+
+        "guild_id": None,
+        "channel_id": None,
+        "message_id": None,
+
+        "current_part": None,
+
+        "participants": [],
+        "waiting": [],
+
+        "full_notification_sent": False,
+        "recruitment_was_full": False
+    }
+
+
+    with open(
+        RECRUITMENT_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            recruitment_state,
+            f,
+            ensure_ascii=False,
+            indent=4
+        )
+
+
+load_recruitment_state()
+
+
+# ==================================================
 # 운영진 확인
 # ==================================================
 
@@ -639,6 +821,66 @@ def make_participant_list():
 
 
 # ==================================================
+# Restart 후 기존 참여 명단 메시지 찾기
+# ==================================================
+
+async def restore_participant_message():
+
+    global participant_message
+
+    if participant_message is not None:
+        return
+
+    if current_part is None:
+        return
+
+    channel_id = recruitment_state.get(
+        "channel_id"
+    )
+
+    message_id = recruitment_state.get(
+        "message_id"
+    )
+
+    if not channel_id:
+        return
+
+    if not message_id:
+        return
+
+
+    try:
+
+        channel = bot.get_channel(
+            int(channel_id)
+        )
+
+        if channel is None:
+
+            channel = await bot.fetch_channel(
+                int(channel_id)
+            )
+
+
+        participant_message = (
+            await channel.fetch_message(
+                int(message_id)
+            )
+        )
+
+
+    except (
+        discord.NotFound,
+        discord.Forbidden,
+        discord.HTTPException,
+        ValueError,
+        TypeError
+    ):
+
+        participant_message = None
+
+
+# ==================================================
 # 현재 명단 메시지 업데이트
 # ==================================================
 
@@ -648,7 +890,13 @@ async def update_participant_message(
 
     global participant_message
 
+    if participant_message is None:
+
+        await restore_participant_message()
+
+
     text = make_participant_list()
+
 
     if participant_message:
 
@@ -656,6 +904,10 @@ async def update_participant_message(
 
             await participant_message.edit(
                 content=text
+            )
+
+            save_recruitment_state(
+                channel.guild
             )
 
             return
@@ -667,10 +919,16 @@ async def update_participant_message(
 
             participant_message = None
 
+
     participant_message = (
         await channel.send(
             text
         )
+    )
+
+
+    save_recruitment_state(
+        channel.guild
     )
 
 
@@ -705,6 +963,13 @@ async def check_full_status(
         full_notification_sent = True
         recruitment_was_full = True
 
+
+        # 12명 모집 완료 상태 저장
+        save_recruitment_state(
+            channel.guild
+        )
+
+
         await channel.send(
             f"{admin_mentions}\n\n"
             f"✅ **{current_part}부 인원 모집 완료!**\n"
@@ -723,6 +988,13 @@ async def check_full_status(
     ):
 
         full_notification_sent = False
+
+
+        # 모집 완료 상태 해제 저장
+        save_recruitment_state(
+            channel.guild
+        )
+
 
         if announce_drop:
 
@@ -1181,9 +1453,19 @@ class LadderView(
 @bot.event
 async def on_ready():
 
+    # Restart 후 기존 모집 메시지 연결
+    await restore_participant_message()
+
     print(
         f"{bot.user} 로그인 완료!"
     )
+
+    if current_part is not None:
+
+        print(
+            f"{current_part}부 모집 상태 복구 완료 "
+            f"({len(participants)}/{MAX_PARTICIPANTS}명)"
+        )
 
 
 # ==================================================
@@ -1425,7 +1707,10 @@ async def on_message(message):
                 "• 이전 부 명단은 채팅에 그대로 유지\n"
                 "• 각 부 최종 명단 자동 저장\n"
                 "• 출석은 월요일~일요일 기준\n"
-                "• 봇 재시작 후에도 출석 기록 유지"
+                "• 봇 재시작 후에도 출석 기록 유지\n"
+                "• 봇 재시작 후에도 현재 모집 인원 유지\n"
+                "• 봇 재시작 후에도 다음 부 대기 인원 유지\n"
+                "• 기존 모집 명단 메시지를 그대로 이어서 수정"
             ),
             inline=False
         )
@@ -2487,6 +2772,12 @@ async def on_message(message):
             )
 
 
+            # 모집 상태도 저장
+            save_recruitment_state(
+                message.guild
+            )
+
+
             await check_full_status(
                 message.channel
             )
@@ -2590,6 +2881,11 @@ async def on_message(message):
         )
 
 
+        save_recruitment_state(
+            message.guild
+        )
+
+
         await check_full_status(
             message.channel
         )
@@ -2680,6 +2976,11 @@ async def on_message(message):
 
 
         save_current_part_history(
+            message.guild
+        )
+
+
+        save_recruitment_state(
             message.guild
         )
 
@@ -2828,6 +3129,11 @@ async def on_message(message):
         )
 
 
+        save_recruitment_state(
+            message.guild
+        )
+
+
         await check_full_status(
             message.channel
         )
@@ -2947,6 +3253,11 @@ async def on_message(message):
 
 
         save_current_part_history(
+            message.guild
+        )
+
+
+        save_recruitment_state(
             message.guild
         )
 
@@ -3106,8 +3417,11 @@ async def on_message(message):
         recruitment_was_full = False
 
 
-        # attendance.json / part_history.json은
-        # 삭제하지 않음
+        # 모집 진행 상태만 초기화
+        # attendance.json / part_history.json은 유지
+        clear_recruitment_state()
+
+
         async for msg in (
             message.channel.history(
                 limit=None
