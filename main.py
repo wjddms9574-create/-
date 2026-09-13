@@ -42,7 +42,7 @@ bot = commands.Bot(
 
 
 # ==================================================
-# 공통 JSON 저장/불러오기
+# JSON
 # ==================================================
 
 def load_json_file(path, default):
@@ -79,7 +79,6 @@ recruitment_was_full = False
 
 # ==================================================
 # 모집 상태 저장
-# Restart 복구용
 # ==================================================
 
 RECRUITMENT_FILE = "recruitment_state.json"
@@ -127,21 +126,9 @@ def load_recruitment_state():
 def save_recruitment_state(guild=None):
     global recruitment_state
 
-    old_guild_id = recruitment_state.get(
-        "guild_id"
-    )
-
-    old_channel_id = recruitment_state.get(
-        "channel_id"
-    )
-
-    old_message_id = recruitment_state.get(
-        "message_id"
-    )
-
-    guild_id = old_guild_id
-    channel_id = old_channel_id
-    message_id = old_message_id
+    guild_id = recruitment_state.get("guild_id")
+    channel_id = recruitment_state.get("channel_id")
+    message_id = recruitment_state.get("message_id")
 
     if guild is not None:
         guild_id = guild.id
@@ -191,7 +178,7 @@ load_recruitment_state()
 
 
 # ==================================================
-# 운영진 확인
+# 운영진
 # ==================================================
 
 def is_admin(member):
@@ -209,11 +196,6 @@ def is_admin(member):
     )
 
 
-# ==================================================
-# 모집 알림용 운영진 멘션
-# 운영진 역할만 멘션
-# ==================================================
-
 def get_admin_mentions(guild):
     role = discord.utils.get(
         guild.roles,
@@ -227,10 +209,11 @@ def get_admin_mentions(guild):
 
 
 # ==================================================
-# 출석 저장
+# 출석
 # ==================================================
 
 ATTENDANCE_FILE = "attendance.json"
+
 attendance_data = load_json_file(
     ATTENDANCE_FILE,
     {}
@@ -245,10 +228,11 @@ def save_attendance():
 
 
 # ==================================================
-# 부별 명단 기록
+# 부별 명단
 # ==================================================
 
 PART_HISTORY_FILE = "part_history.json"
+
 part_history = load_json_file(
     PART_HISTORY_FILE,
     {}
@@ -263,10 +247,11 @@ def save_part_history():
 
 
 # ==================================================
-# 클랜 관리 데이터
+# 클랜 관리
 # ==================================================
 
 MANAGEMENT_FILE = "clan_management.json"
+
 management_data = load_json_file(
     MANAGEMENT_FILE,
     {}
@@ -299,22 +284,27 @@ def get_guild_management(guild_id):
         "management_channel_id",
         None
     )
+
     data.setdefault(
         "absence_reason_channel_id",
         None
     )
+
     data.setdefault(
         "warnings",
         {}
     )
+
     data.setdefault(
         "inactivity",
         {}
     )
+
     data.setdefault(
         "reasons",
         {}
     )
+
     data.setdefault(
         "weekly_processed",
         []
@@ -324,8 +314,7 @@ def get_guild_management(guild_id):
 
 
 # ==================================================
-# 현재 주차
-# 월요일 ~ 일요일
+# 주차
 # ==================================================
 
 def get_week_info(target_date=None):
@@ -374,7 +363,7 @@ def get_current_attendance():
 
 
 # ==================================================
-# 현재 부 명단 자동 저장
+# 부별 명단 저장
 # ==================================================
 
 def save_current_part_history(guild):
@@ -430,22 +419,14 @@ def get_saved_part_history(
 
     return (
         part_history
-        .get(
-            guild_id,
-            {}
-        )
-        .get(
-            week_key,
-            {}
-        )
-        .get(
-            part_key
-        )
+        .get(guild_id, {})
+        .get(week_key, {})
+        .get(part_key)
     )
 
 
 # ==================================================
-# 클랜원 역할
+# 클랜원
 # ==================================================
 
 def get_clan_members(guild):
@@ -464,15 +445,13 @@ def get_clan_members(guild):
             continue
 
         if clan_role in member.roles:
-            members.append(
-                member
-            )
+            members.append(member)
 
     return members
 
 
 # ==================================================
-# 긴 명단 나누기
+# 긴 명단
 # ==================================================
 
 def split_lines(
@@ -497,24 +476,327 @@ def split_lines(
             + len(add_text)
             > max_length
         ):
-            chunks.append(
-                current
-            )
+            chunks.append(current)
             current = line
-
         else:
             current += add_text
 
     if current:
-        chunks.append(
-            current
-        )
+        chunks.append(current)
 
     return chunks
 
 
 # ==================================================
-# 대내투표
+# 닉네임
+# ==================================================
+
+def get_base_name(member):
+    display_name = member.display_name.strip()
+
+    for tag in [
+        "[M]",
+        "[R]",
+        "[S]"
+    ]:
+        if display_name.startswith(tag):
+            display_name = (
+                display_name[
+                    len(tag):
+                ].strip()
+            )
+            break
+
+    return (
+        display_name
+        .split("/")[0]
+        .strip()
+    )
+
+
+def find_member_by_name(
+    guild,
+    name
+):
+    target_name = name.strip().lower()
+
+    exact_matches = []
+    partial_matches = []
+
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        base_name = (
+            get_base_name(member)
+            .lower()
+        )
+
+        if target_name == base_name:
+            exact_matches.append(member)
+
+        elif target_name in base_name:
+            partial_matches.append(member)
+
+    if len(exact_matches) == 1:
+        return exact_matches[0], None, []
+
+    if len(exact_matches) > 1:
+        return None, "duplicate", exact_matches
+
+    if len(partial_matches) == 1:
+        return partial_matches[0], None, []
+
+    if len(partial_matches) == 0:
+        return None, "not_found", []
+
+    return None, "duplicate", partial_matches
+
+
+async def handle_search_error(
+    channel,
+    name,
+    error,
+    matches
+):
+    if error == "not_found":
+        notice = await channel.send(
+            f"⚠️ `{name}` 닉네임을 찾을 수 없습니다."
+        )
+
+        await notice.delete(
+            delay=5
+        )
+
+        return True
+
+    if error == "duplicate":
+        names = "\n".join(
+            f"• {member.display_name}"
+            for member in matches[:10]
+        )
+
+        notice = await channel.send(
+            f"⚠️ `{name}`으로 여러 명이 검색됐습니다.\n\n"
+            f"{names}\n\n"
+            f"조금 더 구체적으로 입력해주세요."
+        )
+
+        await notice.delete(
+            delay=10
+        )
+
+        return True
+
+    return False
+
+
+# ==================================================
+# 참여 중복
+# ==================================================
+
+def user_exists(user_id):
+    return (
+        any(
+            user["id"] == user_id
+            for user in participants
+        )
+        or
+        any(
+            user["id"] == user_id
+            for user in waiting
+        )
+    )
+
+
+# ==================================================
+# 참여 명단
+# ==================================================
+
+def make_participant_list():
+    if current_part is None:
+        return "📋 **대내 모집이 시작되지 않았습니다.**"
+
+    lines = [
+        f"🔥 **{current_part}부 대내**",
+        "",
+        "📋 **참여 명단**",
+        ""
+    ]
+
+    if not participants:
+        lines.append(
+            "현재 참여자가 없습니다."
+        )
+    else:
+        for i, user in enumerate(
+            participants,
+            1
+        ):
+            lines.append(
+                f"{i}. {user['name']}"
+            )
+
+    if waiting:
+        lines.extend([
+            "",
+            "⏳ **다음 부 대기**",
+            ""
+        ])
+
+        for i, user in enumerate(
+            waiting,
+            1
+        ):
+            lines.append(
+                f"{i}. {user['name']}"
+            )
+
+    return "\n".join(lines)
+
+
+async def restore_participant_message():
+    global participant_message
+
+    if participant_message is not None:
+        return
+
+    if current_part is None:
+        return
+
+    channel_id = recruitment_state.get(
+        "channel_id"
+    )
+
+    message_id = recruitment_state.get(
+        "message_id"
+    )
+
+    if not channel_id or not message_id:
+        return
+
+    try:
+        channel = bot.get_channel(
+            int(channel_id)
+        )
+
+        if channel is None:
+            channel = await bot.fetch_channel(
+                int(channel_id)
+            )
+
+        participant_message = (
+            await channel.fetch_message(
+                int(message_id)
+            )
+        )
+
+    except (
+        discord.NotFound,
+        discord.Forbidden,
+        discord.HTTPException,
+        ValueError,
+        TypeError
+    ):
+        participant_message = None
+
+
+async def update_participant_message(channel):
+    global participant_message
+
+    if participant_message is None:
+        await restore_participant_message()
+
+    text = make_participant_list()
+
+    if participant_message:
+        try:
+            await participant_message.edit(
+                content=text
+            )
+
+            save_recruitment_state(
+                channel.guild
+            )
+
+            return
+
+        except (
+            discord.NotFound,
+            discord.HTTPException
+        ):
+            participant_message = None
+
+    participant_message = (
+        await channel.send(text)
+    )
+
+    save_recruitment_state(
+        channel.guild
+    )
+
+
+async def check_full_status(
+    channel,
+    announce_drop=True
+):
+    global full_notification_sent
+    global recruitment_was_full
+
+    count = len(participants)
+
+    admin_mentions = get_admin_mentions(
+        channel.guild
+    )
+
+    if (
+        count == MAX_PARTICIPANTS
+        and not full_notification_sent
+    ):
+        full_notification_sent = True
+        recruitment_was_full = True
+
+        save_recruitment_state(
+            channel.guild
+        )
+
+        await channel.send(
+            f"{admin_mentions}\n\n"
+            f"✅ **{current_part}부 인원 모집 완료!**\n"
+            f"집합 시간을 정해주세요.",
+            allowed_mentions=discord.AllowedMentions(
+                roles=True,
+                users=False,
+                everyone=False
+            )
+        )
+
+    elif (
+        count == MAX_PARTICIPANTS - 1
+        and full_notification_sent
+    ):
+        full_notification_sent = False
+
+        save_recruitment_state(
+            channel.guild
+        )
+
+        if announce_drop:
+            await channel.send(
+                f"{admin_mentions}\n\n"
+                f"⚠️ **{current_part}부 참여자 한 명이 빠졌습니다.**\n"
+                f"현재 인원: "
+                f"**{count}/{MAX_PARTICIPANTS}명**",
+                allowed_mentions=discord.AllowedMentions(
+                    roles=True,
+                    users=False,
+                    everyone=False
+                )
+            )
+
+
+# ==================================================
+# 투표
 # ==================================================
 
 POLL_FILE = "poll_state.json"
@@ -581,7 +863,7 @@ def format_poll_datetime(dt):
 
 
 def make_poll_embed(date_text):
-    embed = discord.Embed(
+    return discord.Embed(
         description=(
             f"**{date_text} 참가자 명단**\n\n"
             f"라플 참가자 {POLL_R} / "
@@ -598,384 +880,20 @@ def make_poll_embed(date_text):
         color=discord.Color.red()
     )
 
-    return embed
-
 
 # ==================================================
-# 참여 명단
+# 관리 날짜
 # ==================================================
 
-def make_participant_list():
-    if current_part is None:
-        return (
-            "📋 **대내 모집이 시작되지 않았습니다.**"
-        )
-
-    lines = [
-        f"🔥 **{current_part}부 대내**",
-        "",
-        "📋 **참여 명단**",
-        ""
-    ]
-
-    if not participants:
-        lines.append(
-            "현재 참여자가 없습니다."
-        )
-
-    else:
-        for i, user in enumerate(
-            participants,
-            1
-        ):
-            lines.append(
-                f"{i}. {user['name']}"
-            )
-
-    if waiting:
-        lines.extend([
-            "",
-            "⏳ **다음 부 대기**",
-            ""
-        ])
-
-        for i, user in enumerate(
-            waiting,
-            1
-        ):
-            lines.append(
-                f"{i}. {user['name']}"
-            )
-
-    return "\n".join(
-        lines
-    )
-
-
-# ==================================================
-# Restart 후 기존 참여 명단 메시지 복구
-# ==================================================
-
-async def restore_participant_message():
-    global participant_message
-
-    if participant_message is not None:
-        return
-
-    if current_part is None:
-        return
-
-    channel_id = recruitment_state.get(
-        "channel_id"
-    )
-
-    message_id = recruitment_state.get(
-        "message_id"
-    )
-
-    if not channel_id:
-        return
-
-    if not message_id:
-        return
-
-    try:
-        channel = bot.get_channel(
-            int(channel_id)
-        )
-
-        if channel is None:
-            channel = await bot.fetch_channel(
-                int(channel_id)
-            )
-
-        participant_message = (
-            await channel.fetch_message(
-                int(message_id)
-            )
-        )
-
-    except (
-        discord.NotFound,
-        discord.Forbidden,
-        discord.HTTPException,
-        ValueError,
-        TypeError
-    ):
-        participant_message = None
-
-
-async def update_participant_message(
-    channel
+def parse_simple_date(
+    text,
+    reference_date=None,
+    future=True
 ):
-    global participant_message
-
-    if participant_message is None:
-        await restore_participant_message()
-
-    text = make_participant_list()
-
-    if participant_message:
-        try:
-            await participant_message.edit(
-                content=text
-            )
-
-            save_recruitment_state(
-                channel.guild
-            )
-            return
-
-        except (
-            discord.NotFound,
-            discord.HTTPException
-        ):
-            participant_message = None
-
-    participant_message = (
-        await channel.send(
-            text
-        )
-    )
-
-    save_recruitment_state(
-        channel.guild
-    )
-
-
-# ==================================================
-# 모집 인원 상태 확인
-# ==================================================
-
-async def check_full_status(
-    channel,
-    announce_drop=True
-):
-    global full_notification_sent
-    global recruitment_was_full
-
-    count = len(
-        participants
-    )
-
-    admin_mentions = (
-        get_admin_mentions(
-            channel.guild
-        )
-    )
-
-    if (
-        count == MAX_PARTICIPANTS
-        and
-        not full_notification_sent
-    ):
-        full_notification_sent = True
-        recruitment_was_full = True
-
-        save_recruitment_state(
-            channel.guild
-        )
-
-        await channel.send(
-            f"{admin_mentions}\n\n"
-            f"✅ **{current_part}부 인원 모집 완료!**\n"
-            f"집합 시간을 정해주세요.",
-            allowed_mentions=discord.AllowedMentions(
-                roles=True,
-                users=False,
-                everyone=False
-            )
-        )
-
-    elif (
-        count == MAX_PARTICIPANTS - 1
-        and
-        full_notification_sent
-    ):
-        full_notification_sent = False
-
-        save_recruitment_state(
-            channel.guild
-        )
-
-        if announce_drop:
-            await channel.send(
-                f"{admin_mentions}\n\n"
-                f"⚠️ **{current_part}부 참여자 한 명이 빠졌습니다.**\n"
-                f"현재 인원: "
-                f"**{count}/{MAX_PARTICIPANTS}명**",
-                allowed_mentions=discord.AllowedMentions(
-                    roles=True,
-                    users=False,
-                    everyone=False
-                )
-            )
-
-
-# ==================================================
-# 중복 참여 확인
-# ==================================================
-
-def user_exists(user_id):
-    return (
-        any(
-            user["id"] == user_id
-            for user in participants
-        )
-        or
-        any(
-            user["id"] == user_id
-            for user in waiting
-        )
-    )
-
-
-# ==================================================
-# 닉네임 기본 이름
-# ==================================================
-
-def get_base_name(member):
-    display_name = (
-        member.display_name.strip()
-    )
-
-    for tag in [
-        "[M]",
-        "[R]",
-        "[S]"
-    ]:
-        if display_name.startswith(
-            tag
-        ):
-            display_name = (
-                display_name[
-                    len(tag):
-                ].strip()
-            )
-            break
-
-    return (
-        display_name
-        .split("/")[0]
-        .strip()
-    )
-
-
-# ==================================================
-# 닉네임 검색
-# ==================================================
-
-def find_member_by_name(
-    guild,
-    name
-):
-    target_name = (
-        name.strip().lower()
-    )
-
-    exact_matches = []
-    partial_matches = []
-
-    for member in guild.members:
-        if member.bot:
-            continue
-
-        base_name = (
-            get_base_name(
-                member
-            ).lower()
-        )
-
-        if target_name == base_name:
-            exact_matches.append(
-                member
-            )
-
-        elif target_name in base_name:
-            partial_matches.append(
-                member
-            )
-
-    if len(exact_matches) == 1:
-        return (
-            exact_matches[0],
-            None,
-            []
-        )
-
-    if len(exact_matches) > 1:
-        return (
-            None,
-            "duplicate",
-            exact_matches
-        )
-
-    if len(partial_matches) == 1:
-        return (
-            partial_matches[0],
-            None,
-            []
-        )
-
-    if len(partial_matches) == 0:
-        return (
-            None,
-            "not_found",
-            []
-        )
-
-    return (
-        None,
-        "duplicate",
-        partial_matches
-    )
-
-
-async def handle_search_error(
-    channel,
-    name,
-    error,
-    matches
-):
-    if error == "not_found":
-        notice = await channel.send(
-            f"⚠️ `{name}` 닉네임을 찾을 수 없습니다."
-        )
-
-        await notice.delete(
-            delay=5
-        )
-
-        return True
-
-    if error == "duplicate":
-        names = "\n".join(
-            f"• {member.display_name}"
-            for member in matches[:10]
-        )
-
-        notice = await channel.send(
-            f"⚠️ `{name}`으로 여러 명이 검색됐습니다.\n\n"
-            f"{names}\n\n"
-            f"조금 더 구체적으로 입력해주세요."
-        )
-
-        await notice.delete(
-            delay=10
-        )
-
-        return True
-
-    return False
-
-
-# ==================================================
-# 클랜 관리 - 날짜 파싱
-# ==================================================
-
-def parse_simple_date(text, reference_date=None):
     if reference_date is None:
-        reference_date = datetime.now(KST).date()
+        reference_date = datetime.now(
+            KST
+        ).date()
 
     patterns = [
         r"(?P<year>\d{4})[-./](?P<month>\d{1,2})[-./](?P<day>\d{1,2})",
@@ -995,9 +913,7 @@ def parse_simple_date(text, reference_date=None):
 
         groups = match.groupdict()
 
-        year_text = groups.get(
-            "year"
-        )
+        year_text = groups.get("year")
 
         year = (
             int(year_text)
@@ -1023,27 +939,35 @@ def parse_simple_date(text, reference_date=None):
             continue
 
         if not year_text:
-            if (
-                parsed
-                < reference_date - timedelta(days=30)
-            ):
-                try:
-                    parsed = date(
-                        year + 1,
-                        month,
-                        day
-                    )
-                except ValueError:
-                    pass
+            if future:
+                if (
+                    parsed
+                    < reference_date
+                ):
+                    try:
+                        parsed = date(
+                            year + 1,
+                            month,
+                            day
+                        )
+                    except ValueError:
+                        pass
+
+            else:
+                if parsed > reference_date:
+                    try:
+                        parsed = date(
+                            year - 1,
+                            month,
+                            day
+                        )
+                    except ValueError:
+                        pass
 
         return parsed
 
     return None
 
-
-# ==================================================
-# 클랜 관리 - 사유 확인
-# ==================================================
 
 def get_reason_record(
     guild_id,
@@ -1066,7 +990,9 @@ def is_reason_active(
     target_date=None
 ):
     if target_date is None:
-        target_date = datetime.now(KST).date()
+        target_date = datetime.now(
+            KST
+        ).date()
 
     record = get_reason_record(
         guild_id,
@@ -1086,8 +1012,6 @@ def is_reason_active(
         "expires"
     )
 
-    # 날짜가 없는 사유는 운영진이 종료할 때까지
-    # 경고 판정을 보류합니다.
     if not expires:
         return True
 
@@ -1096,20 +1020,25 @@ def is_reason_active(
             expires,
             "%Y-%m-%d"
         ).date()
-        def cleanup_expired_reasons(
-    guild_id
-):
+    except ValueError:
+        return True
+
+    return target_date <= expires_date
+
+
+def cleanup_expired_reasons(guild_id):
     data = get_guild_management(
         guild_id
     )
 
     changed = False
-    today = datetime.now(KST).date()
+    today = datetime.now(
+        KST
+    ).date()
 
     for record in data[
         "reasons"
     ].values():
-
         if not record.get(
             "active",
             False
@@ -1136,14 +1065,13 @@ def is_reason_active(
             record["closed_at"] = (
                 today.isoformat()
             )
+
             changed = True
 
     if changed:
         save_management()
-
-
 # ==================================================
-# 클랜 관리 - 경고
+# 경고 기록
 # ==================================================
 
 def get_warning_record(
@@ -1158,22 +1086,36 @@ def get_warning_record(
         user_id
     )
 
-    if user_key not in data[
-        "warnings"
-    ]:
-        data[
-            "warnings"
-        ][user_key] = {
+    if user_key not in data["warnings"]:
+        data["warnings"][user_key] = {
             "count": 0,
-            "events": []
+            "events": [],
+            "history": []
         }
 
-    return data[
-        "warnings"
-    ][user_key]
+    record = data["warnings"][
+        user_key
+    ]
+
+    record.setdefault(
+        "count",
+        0
+    )
+
+    record.setdefault(
+        "events",
+        []
+    )
+
+    record.setdefault(
+        "history",
+        []
+    )
+
+    return record
 
 
-def add_warning_event(
+def add_warning_once(
     guild_id,
     user_id,
     event_key,
@@ -1184,39 +1126,26 @@ def add_warning_event(
         user_id
     )
 
-    for event in record[
-        "events"
-    ]:
-        if event.get(
-            "key"
-        ) == event_key:
-            return False, record["count"]
+    if event_key in record["events"]:
+        return False
 
-    record[
-        "events"
-    ].append(
-        {
-            "key": event_key,
-            "reason": reason,
-            "created_at": datetime.now(
-                KST
-            ).isoformat()
-        }
+    record["events"].append(
+        event_key
     )
 
-    record["count"] = (
-        int(
-            record.get(
-                "count",
-                0
-            )
-        )
-        + 1
-    )
+    record["count"] += 1
+
+    record["history"].append({
+        "event": event_key,
+        "reason": reason,
+        "date": datetime.now(
+            KST
+        ).date().isoformat()
+    })
 
     save_management()
 
-    return True, record["count"]
+    return True
 
 
 def get_warning_count(
@@ -1243,26 +1172,99 @@ def get_warning_count(
 
 
 # ==================================================
-# 클랜 관리 - 미접
+# 관리 채널 가져오기
 # ==================================================
 
-def get_inactivity_record(
-    guild_id,
-    user_id
+def get_management_channel(
+    guild
 ):
     data = get_guild_management(
-        guild_id
+        guild.id
     )
 
-    return data[
-        "inactivity"
-    ].get(
-        str(user_id)
+    channel_id = data.get(
+        "management_channel_id"
     )
 
+    if channel_id:
+        channel = guild.get_channel(
+            int(channel_id)
+        )
 
-def get_inactive_days(record):
+        if channel is not None:
+            return channel
+
+    for channel in guild.text_channels:
+        clean_name = (
+            channel.name
+            .replace("📋", "")
+            .replace("・", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        )
+
+        if "관리현황" in clean_name:
+            return channel
+
+    return None
+
+
+def get_reason_channel(
+    guild
+):
+    data = get_guild_management(
+        guild.id
+    )
+
+    channel_id = data.get(
+        "absence_reason_channel_id"
+    )
+
+    if channel_id:
+        channel = guild.get_channel(
+            int(channel_id)
+        )
+
+        if channel is not None:
+            return channel
+
+    for channel in guild.text_channels:
+        clean_name = (
+            channel.name
+            .replace("📝", "")
+            .replace("・", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        )
+
+        if "미접사유" in clean_name:
+            return channel
+
+    return None
+
+
+# ==================================================
+# 미접 일수
+# ==================================================
+
+def get_inactive_days(
+    record,
+    target_date=None
+):
+    if target_date is None:
+        target_date = datetime.now(
+            KST
+        ).date()
+
     if not record:
+        return None
+
+    if not record.get(
+        "active",
+        False
+    ):
         return None
 
     last_seen = record.get(
@@ -1277,463 +1279,21 @@ def get_inactive_days(record):
             last_seen,
             "%Y-%m-%d"
         ).date()
+
     except ValueError:
         return None
 
-    return (
-        datetime.now(KST).date()
-        - last_seen_date
-    ).days
-
-
-# ==================================================
-# 클랜 관리 - 채널
-# ==================================================
-
-async def get_management_channel(
-    guild
-):
-    data = get_guild_management(
-        guild.id
-    )
-
-    channel_id = data.get(
-        "management_channel_id"
-    )
-
-    if not channel_id:
-        return None
-
-    channel = guild.get_channel(
-        int(channel_id)
-    )
-
-    if channel is not None:
-        return channel
-
-    try:
-        return await bot.fetch_channel(
-            int(channel_id)
-        )
-    except:
-        return None
-
-
-# ==================================================
-# 클랜 관리 - 현재 현황 계산
-# ==================================================
-
-def build_management_status(
-    guild,
-    week_key=None,
-    target_date=None
-):
-    if target_date is None:
-        target_date = datetime.now(
-            KST
-        ).date()
-
-    if week_key is None:
-        week_key, monday, sunday = (
-            get_week_info(
-                target_date
-            )
-        )
-    else:
-        monday = datetime.strptime(
-            week_key,
-            "%Y-%m-%d"
-        ).date()
-
-        sunday = (
-            monday
-            + timedelta(days=6)
-        )
-
-    clan_members = get_clan_members(
-        guild
-    )
-
-    if clan_members is None:
-        return None
-
-    week_data = attendance_data.get(
-        week_key,
-        {}
-    )
-
-    attended_ids = set(
-        week_data.keys()
-    )
-
-    warning_items = []
-    expulsion_items = []
-    reason_items = []
-    normal_count = 0
-
-    for member in clan_members:
-        user_id = str(
-            member.id
-        )
-
-        reason_record = get_reason_record(
-            guild.id,
-            member.id
-        )
-
-        active_reason = is_reason_active(
-            guild.id,
-            member.id,
+    return max(
+        (
             target_date
-        )
-
-        if active_reason:
-            expires = reason_record.get(
-                "expires"
-            )
-
-            if expires:
-                try:
-                    exp_date = datetime.strptime(
-                        expires,
-                        "%Y-%m-%d"
-                    ).date()
-
-                    reason_items.append(
-                        f"• {member.display_name} — "
-                        f"{exp_date.month}/{exp_date.day}까지"
-                    )
-                except ValueError:
-                    reason_items.append(
-                        f"• {member.display_name} — 사유 등록"
-                    )
-            else:
-                reason_items.append(
-                    f"• {member.display_name} — 기간 확인 필요"
-                )
-
-            continue
-
-        reasons = []
-        is_expulsion = False
-
-        warning_count = get_warning_count(
-            guild.id,
-            member.id
-        )
-
-        if warning_count >= 2:
-            is_expulsion = True
-            reasons.append(
-                f"경고 {warning_count}회"
-            )
-
-        inactivity = get_inactivity_record(
-            guild.id,
-            member.id
-        )
-
-        inactive_days = get_inactive_days(
-            inactivity
-        )
-
-        if (
-            inactive_days is not None
-            and inactive_days >= 10
-        ):
-            is_expulsion = True
-            reasons.append(
-                f"미접 {inactive_days}일"
-            )
-
-        elif (
-            inactive_days is not None
-            and inactive_days >= 7
-        ):
-            reasons.append(
-                f"미접 {inactive_days}일"
-            )
-
-        if user_id not in attended_ids:
-            reasons.append(
-                "이번 주 대내 미참여"
-            )
-
-        if is_expulsion:
-            expulsion_items.append(
-                f"• {member.display_name} — "
-                + " / ".join(
-                    dict.fromkeys(
-                        reasons
-                    )
-                )
-            )
-
-        elif warning_count > 0 or (
-            inactive_days is not None
-            and inactive_days >= 7
-        ):
-            warning_items.append(
-                f"• {member.display_name} — "
-                + " / ".join(
-                    dict.fromkeys(
-                        reasons
-                    )
-                )
-            )
-
-        else:
-            normal_count += 1
-
-    return {
-        "week_key": week_key,
-        "monday": monday,
-        "sunday": sunday,
-        "warning_items": warning_items,
-        "expulsion_items": expulsion_items,
-        "reason_items": reason_items,
-        "normal_count": normal_count,
-        "total": len(clan_members)
-    }
-
-
-async def send_management_status(
-    channel,
-    guild,
-    title="📋 전사 클랜 관리 현황",
-    week_key=None,
-    target_date=None
-):
-    status = build_management_status(
-        guild,
-        week_key=week_key,
-        target_date=target_date
-    )
-
-    if status is None:
-        await channel.send(
-            f"⚠️ `{CLAN_ROLE_NAME}` 역할을 찾을 수 없습니다."
-        )
-        return
-
-    embed = discord.Embed(
-        title=title,
-        description=(
-            f"📅 "
-            f"{status['monday'].strftime('%Y.%m.%d')} "
-            f"~ "
-            f"{status['sunday'].strftime('%Y.%m.%d')}\n"
-            f"👥 관리 대상 클랜원: "
-            f"**{status['total']}명**"
-        ),
-        color=discord.Color.red()
-    )
-
-    embed.add_field(
-        name="🚨 제명 대상",
-        value=(
-            "\n".join(
-                status[
-                    "expulsion_items"
-                ][:20]
-            )
-            if status[
-                "expulsion_items"
-            ]
-            else "없음"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="⚠️ 경고/주의 대상",
-        value=(
-            "\n".join(
-                status[
-                    "warning_items"
-                ][:20]
-            )
-            if status[
-                "warning_items"
-            ]
-            else "없음"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="📝 미접사유 등록",
-        value=(
-            "\n".join(
-                status[
-                    "reason_items"
-                ][:20]
-            )
-            if status[
-                "reason_items"
-            ]
-            else "없음"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="✅ 이상 없음",
-        value=(
-            f"{status['normal_count']}명"
-        ),
-        inline=False
-    )
-
-    await channel.send(
-        embed=embed
+            - last_seen_date
+        ).days,
+        0
     )
 
 
 # ==================================================
-# 클랜 관리 - 주간 최종 처리
-# ==================================================
-
-async def process_weekly_attendance(
-    guild,
-    week_key,
-    send_summary=True
-):
-    data = get_guild_management(
-        guild.id
-    )
-
-    if week_key in data[
-        "weekly_processed"
-    ]:
-        return False
-
-    clan_members = get_clan_members(
-        guild
-    )
-
-    if clan_members is None:
-        return False
-
-    monday = datetime.strptime(
-        week_key,
-        "%Y-%m-%d"
-    ).date()
-
-    sunday = (
-        monday
-        + timedelta(days=6)
-    )
-
-    week_data = attendance_data.get(
-        week_key,
-        {}
-    )
-
-    attended_ids = set(
-        week_data.keys()
-    )
-
-    new_warnings = []
-
-    for member in clan_members:
-        user_key = str(
-            member.id
-        )
-
-        if user_key in attended_ids:
-            continue
-
-        if is_reason_active(
-            guild.id,
-            member.id,
-            sunday
-        ):
-            continue
-
-        event_key = (
-            f"attendance:{week_key}:{member.id}"
-        )
-
-        added, count = add_warning_event(
-            guild.id,
-            member.id,
-            event_key,
-            "주 1회 대내 미참여 / 미접사유 없음"
-        )
-
-        if added:
-            if count >= 2:
-                new_warnings.append(
-                    f"🚨 {member.display_name} — "
-                    f"주간 미참여 경고 {count}회 / 제명 대상"
-                )
-            else:
-                new_warnings.append(
-                    f"⚠️ {member.display_name} — "
-                    f"주간 미참여 / 경고 {count}회"
-                )
-
-    data = get_guild_management(
-        guild.id
-    )
-
-    data[
-        "weekly_processed"
-    ].append(
-        week_key
-    )
-
-    data[
-        "weekly_processed"
-    ] = data[
-        "weekly_processed"
-    ][-20:]
-
-    save_management()
-
-    if send_summary:
-        channel = await get_management_channel(
-            guild
-        )
-
-        if channel:
-            admin_mentions = get_admin_mentions(
-                guild
-            )
-
-            await channel.send(
-                f"{admin_mentions}\n\n"
-                f"📅 **주간 관리 최종 집계 완료**\n"
-                f"{monday.strftime('%Y.%m.%d')} "
-                f"~ {sunday.strftime('%Y.%m.%d')}",
-                allowed_mentions=discord.AllowedMentions(
-                    roles=True,
-                    users=False,
-                    everyone=False
-                )
-            )
-
-            if new_warnings:
-                await channel.send(
-                    "\n".join(
-                        new_warnings
-                    )
-                )
-
-            await send_management_status(
-                channel,
-                guild,
-                title="📋 이번 주 최종 클랜 관리 결과",
-                week_key=week_key,
-                target_date=sunday
-            )
-
-    return True
-
-
-# ==================================================
-# 클랜 관리 - 미접 7일/10일 자동 처리
+# 미접 자동 판정
 # ==================================================
 
 async def process_inactivity(
@@ -1744,6 +1304,10 @@ async def process_inactivity(
         guild.id
     )
 
+    cleanup_expired_reasons(
+        guild.id
+    )
+
     clan_members = get_clan_members(
         guild
     )
@@ -1751,47 +1315,58 @@ async def process_inactivity(
     if clan_members is None:
         return
 
-    member_map = {
-        str(member.id): member
+    clan_ids = {
+        str(member.id)
         for member in clan_members
     }
 
-    channel = None
-
-    if send_alerts:
-        channel = await get_management_channel(
+    management_channel = (
+        get_management_channel(
             guild
         )
+    )
 
-    for user_key, record in list(
-        data[
-            "inactivity"
-        ].items()
+    today = datetime.now(
+        KST
+    ).date()
+
+    alert_lines = []
+
+    for user_id, record in list(
+        data["inactivity"].items()
     ):
-        member = member_map.get(
-            user_key
-        )
-
-        if member is None:
+        if user_id not in clan_ids:
             continue
 
         if not record.get(
             "active",
-            True
+            False
         ):
+            continue
+
+        try:
+            member = guild.get_member(
+                int(user_id)
+            )
+        except (ValueError, TypeError):
+            member = None
+
+        if member is None:
+            continue
+
+        days = get_inactive_days(
+            record,
+            today
+        )
+
+        if days is None:
             continue
 
         if is_reason_active(
             guild.id,
-            member.id
+            member.id,
+            today
         ):
-            continue
-
-        inactive_days = get_inactive_days(
-            record
-        )
-
-        if inactive_days is None:
             continue
 
         last_seen = record.get(
@@ -1799,63 +1374,43 @@ async def process_inactivity(
         )
 
         if (
-            inactive_days >= 7
+            days >= 7
             and not record.get(
                 "warned_7",
                 False
             )
         ):
             event_key = (
-                f"inactive7:{member.id}:{last_seen}"
+                f"inactive7:"
+                f"{member.id}:"
+                f"{last_seen}"
             )
 
-            added, count = add_warning_event(
+            added = add_warning_once(
                 guild.id,
                 member.id,
                 event_key,
-                "미접 7일 / 미접사유 없음"
+                "미접사유 없이 7일 미접"
             )
 
-            record[
-                "warned_7"
-            ] = True
+            record["warned_7"] = True
 
-            save_management()
-
-            if (
-                added
-                and channel
-            ):
-                admin_mentions = get_admin_mentions(
-                    guild
+            if added:
+                warning_count = (
+                    get_warning_count(
+                        guild.id,
+                        member.id
+                    )
                 )
 
-                text = (
-                    f"{admin_mentions}\n\n"
-                    f"⚠️ **미접 경고 대상**\n"
-                    f"{member.display_name} — "
-                    f"미접 **{inactive_days}일**\n"
-                    f"미접사유 없음\n"
-                    f"현재 경고: **{count}회**"
-                )
-
-                if count >= 2:
-                    text += (
-                        "\n🚨 경고 2회 이상으로 "
-                        "제명 대상입니다."
-                    )
-
-                await channel.send(
-                    text,
-                    allowed_mentions=discord.AllowedMentions(
-                        roles=True,
-                        users=False,
-                        everyone=False
-                    )
+                alert_lines.append(
+                    f"⚠️ **{member.display_name}** — "
+                    f"미접 {days}일 / "
+                    f"경고 {warning_count}회"
                 )
 
         if (
-            inactive_days >= 10
+            days >= 10
             and not record.get(
                 "expulsion_10",
                 False
@@ -1865,112 +1420,584 @@ async def process_inactivity(
                 "expulsion_10"
             ] = True
 
-            save_management()
+            alert_lines.append(
+                f"🚨 **{member.display_name}** — "
+                f"미접 {days}일 / "
+                f"제명 대상"
+            )
 
-            if channel:
-                admin_mentions = get_admin_mentions(
+    save_management()
+
+    if (
+        send_alerts
+        and alert_lines
+        and management_channel
+    ):
+        admin_mentions = (
+            get_admin_mentions(
+                guild
+            )
+        )
+
+        await management_channel.send(
+            f"{admin_mentions}\n\n"
+            f"📋 **클랜 관리 자동 알림**\n\n"
+            + "\n".join(
+                alert_lines
+            ),
+            allowed_mentions=discord.AllowedMentions(
+                roles=True,
+                users=False,
+                everyone=False
+            )
+        )
+
+
+# ==================================================
+# 주간 출석 최종 처리
+# ==================================================
+
+async def process_weekly_attendance(
+    guild,
+    target_date=None,
+    send_report=True
+):
+    if target_date is None:
+        target_date = datetime.now(
+            KST
+        ).date()
+
+    (
+        week_key,
+        monday,
+        sunday
+    ) = get_week_info(
+        target_date
+    )
+
+    data = get_guild_management(
+        guild.id
+    )
+
+    if (
+        week_key
+        in data["weekly_processed"]
+    ):
+        return False
+
+    clan_members = get_clan_members(
+        guild
+    )
+
+    if clan_members is None:
+        return False
+
+    week_data = attendance_data.get(
+        week_key,
+        {}
+    )
+
+    attended_ids = set(
+        week_data.keys()
+    )
+
+    warning_lines = []
+    expulsion_lines = []
+    exempt_lines = []
+
+    for member in clan_members:
+        user_id = str(
+            member.id
+        )
+
+        if user_id in attended_ids:
+            continue
+
+        if is_reason_active(
+            guild.id,
+            member.id,
+            sunday
+        ):
+            reason_record = (
+                get_reason_record(
+                    guild.id,
+                    member.id
+                )
+            )
+
+            expires = (
+                reason_record.get(
+                    "expires"
+                )
+                if reason_record
+                else None
+            )
+
+            if expires:
+                try:
+                    expires_date = (
+                        datetime.strptime(
+                            expires,
+                            "%Y-%m-%d"
+                        ).date()
+                    )
+
+                    reason_text = (
+                        f"{expires_date.month}/"
+                        f"{expires_date.day}까지"
+                    )
+
+                except ValueError:
+                    reason_text = (
+                        "미접사유 등록"
+                    )
+            else:
+                reason_text = (
+                    "미접사유 등록 / 기간 확인 필요"
+                )
+
+            exempt_lines.append(
+                f"• {member.display_name} — "
+                f"{reason_text}"
+            )
+
+            continue
+
+        event_key = (
+            f"attendance:"
+            f"{week_key}:"
+            f"{member.id}"
+        )
+
+        added = add_warning_once(
+            guild.id,
+            member.id,
+            event_key,
+            (
+                f"{monday.strftime('%Y.%m.%d')}~"
+                f"{sunday.strftime('%Y.%m.%d')} "
+                f"대내 미참여"
+            )
+        )
+
+        warning_count = (
+            get_warning_count(
+                guild.id,
+                member.id
+            )
+        )
+
+        if warning_count >= 2:
+            expulsion_lines.append(
+                f"• {member.display_name} — "
+                f"대내 미참여 / "
+                f"경고 {warning_count}회"
+            )
+
+        elif added:
+            warning_lines.append(
+                f"• {member.display_name} — "
+                f"이번 주 대내 미참여 / "
+                f"경고 {warning_count}회"
+            )
+
+    data["weekly_processed"].append(
+        week_key
+    )
+
+    save_management()
+
+    if send_report:
+        channel = get_management_channel(
+            guild
+        )
+
+        if channel:
+            lines = [
+                "📋 **이번 주 클랜 관리 결과**",
+                (
+                    f"📅 "
+                    f"{monday.strftime('%Y.%m.%d')} "
+                    f"~ "
+                    f"{sunday.strftime('%Y.%m.%d')}"
+                ),
+                ""
+            ]
+
+            if expulsion_lines:
+                lines.append(
+                    "🚨 **제명 대상**"
+                )
+
+                lines.extend(
+                    expulsion_lines
+                )
+
+                lines.append("")
+
+            if warning_lines:
+                lines.append(
+                    "⚠️ **경고 대상**"
+                )
+
+                lines.extend(
+                    warning_lines
+                )
+
+                lines.append("")
+
+            if exempt_lines:
+                lines.append(
+                    "📝 **미접사유 등록 / 제외**"
+                )
+
+                lines.extend(
+                    exempt_lines
+                )
+
+                lines.append("")
+
+            if (
+                not expulsion_lines
+                and not warning_lines
+                and not exempt_lines
+            ):
+                lines.append(
+                    "✅ 이번 주 관리 대상자가 없습니다."
+                )
+
+            admin_mentions = (
+                get_admin_mentions(
                     guild
                 )
+            )
 
-                await channel.send(
-                    f"{admin_mentions}\n\n"
-                    f"🚨 **미접 제명 대상**\n"
-                    f"{member.display_name} — "
-                    f"미접 **{inactive_days}일**\n"
-                    f"미접사유 없음\n"
-                    f"→ 제명 확인 필요",
-                    allowed_mentions=discord.AllowedMentions(
-                        roles=True,
-                        users=False,
-                        everyone=False
+            await channel.send(
+                f"{admin_mentions}\n\n"
+                + "\n".join(
+                    lines
+                ),
+                allowed_mentions=discord.AllowedMentions(
+                    roles=True,
+                    users=False,
+                    everyone=False
+                )
+            )
+
+    return True
+
+
+# ==================================================
+# 관리현황
+# 보기만 하며 경고 추가 안 함
+# ==================================================
+
+async def send_management_status(
+    channel,
+    guild
+):
+    cleanup_expired_reasons(
+        guild.id
+    )
+
+    data = get_guild_management(
+        guild.id
+    )
+
+    clan_members = get_clan_members(
+        guild
+    )
+
+    if clan_members is None:
+        await channel.send(
+            f"⚠️ `{CLAN_ROLE_NAME}` 역할을 찾을 수 없습니다."
+        )
+        return
+
+    (
+        week_key,
+        monday,
+        sunday,
+        week_data
+    ) = get_current_attendance()
+
+    attended_ids = set(
+        week_data.keys()
+    )
+
+    today = datetime.now(
+        KST
+    ).date()
+
+    expulsion_lines = []
+    warning_lines = []
+    reason_lines = []
+    normal_count = 0
+
+    for member in sorted(
+        clan_members,
+        key=lambda m:
+        m.display_name.lower()
+    ):
+        user_id = str(
+            member.id
+        )
+
+        warning_count = (
+            get_warning_count(
+                guild.id,
+                member.id
+            )
+        )
+
+        inactivity_record = (
+            data["inactivity"].get(
+                user_id
+            )
+        )
+
+        inactive_days = (
+            get_inactive_days(
+                inactivity_record,
+                today
+            )
+        )
+
+        reason_record = (
+            data["reasons"].get(
+                user_id
+            )
+        )
+
+        reason_active = (
+            is_reason_active(
+                guild.id,
+                member.id,
+                today
+            )
+        )
+
+        if reason_active:
+            expires = (
+                reason_record.get(
+                    "expires"
+                )
+                if reason_record
+                else None
+            )
+
+            if expires:
+                try:
+                    expires_date = (
+                        datetime.strptime(
+                            expires,
+                            "%Y-%m-%d"
+                        ).date()
                     )
+
+                    reason_lines.append(
+                        f"• {member.display_name} — "
+                        f"{expires_date.month}/"
+                        f"{expires_date.day}까지"
+                    )
+
+                except ValueError:
+                    reason_lines.append(
+                        f"• {member.display_name} — "
+                        f"기간 확인 필요"
+                    )
+            else:
+                reason_lines.append(
+                    f"• {member.display_name} — "
+                    f"기간 확인 필요"
                 )
 
+            continue
+
+        if (
+            inactive_days is not None
+            and inactive_days >= 10
+        ):
+            expulsion_lines.append(
+                f"• {member.display_name} — "
+                f"미접 {inactive_days}일 / "
+                f"경고 {warning_count}회"
+            )
+
+            continue
+
+        if warning_count >= 2:
+            expulsion_lines.append(
+                f"• {member.display_name} — "
+                f"경고 {warning_count}회"
+            )
+
+            continue
+
+        reasons = []
+
+        if warning_count > 0:
+            reasons.append(
+                f"경고 {warning_count}회"
+            )
+
+        if (
+            inactive_days is not None
+            and inactive_days >= 7
+        ):
+            reasons.append(
+                f"미접 {inactive_days}일"
+            )
+
+        if (
+            user_id not in attended_ids
+        ):
+            reasons.append(
+                "이번 주 대내 미참여"
+            )
+
+        if reasons:
+            warning_lines.append(
+                f"• {member.display_name} — "
+                + " / ".join(
+                    reasons
+                )
+            )
+        else:
+            normal_count += 1
+
+    lines = [
+        "📋 **전사 클랜 관리 현황**",
+        (
+            f"📅 "
+            f"{monday.strftime('%Y.%m.%d')} "
+            f"~ "
+            f"{sunday.strftime('%Y.%m.%d')}"
+        ),
+        ""
+    ]
+
+    if expulsion_lines:
+        lines.append(
+            "🚨 **제명 대상**"
+        )
+
+        lines.extend(
+            expulsion_lines
+        )
+
+        lines.append("")
+
+    if warning_lines:
+        lines.append(
+            "⚠️ **확인 / 경고 현황**"
+        )
+
+        lines.extend(
+            warning_lines
+        )
+
+        lines.append("")
+
+    if reason_lines:
+        lines.append(
+            "📝 **미접사유 등록**"
+        )
+
+        lines.extend(
+            reason_lines
+        )
+
+        lines.append("")
+
+    lines.append(
+        f"✅ **이상 없음: {normal_count}명**"
+    )
+
+    chunks = split_lines(
+        lines
+    )
+
+    for chunk in chunks:
+        await channel.send(
+            chunk
+        )
+
 
 # ==================================================
-# 클랜 관리 - 자동 스케줄
+# 자동 관리 루프
 # ==================================================
 
-def get_latest_due_week_key():
+@tasks.loop(
+    minutes=10
+)
+async def management_loop():
     now = datetime.now(
         KST
     )
 
-    today = now.date()
-
-    week_key, monday, sunday = (
-        get_week_info(
-            today
-        )
-    )
-
-    if (
-        now.weekday() == 6
-        and now.hour >= 23
-    ):
-        return week_key
-
-    previous_sunday = (
-        monday - timedelta(days=1)
-    )
-
-    previous_monday = (
-        previous_sunday
-        - timedelta(days=6)
-    )
-
-    return previous_monday.strftime(
-        "%Y-%m-%d"
-    )
-
-
-@tasks.loop(minutes=60)
-async def clan_management_loop():
     for guild in bot.guilds:
         try:
-            cleanup_expired_reasons(
-                guild.id
-            )
-
             await process_inactivity(
                 guild,
                 send_alerts=True
             )
 
-            data = get_guild_management(
-                guild.id
-            )
-
-            if not data.get(
-                "management_channel_id"
-            ):
-                continue
-
-            due_week_key = (
-                get_latest_due_week_key()
-            )
-
             if (
-                due_week_key
-                not in data[
-                    "weekly_processed"
-                ]
+                now.weekday() == 6
+                and (
+                    now.hour > 23
+                    or (
+                        now.hour == 23
+                        and now.minute >= 0
+                    )
+                )
             ):
                 await process_weekly_attendance(
                     guild,
-                    due_week_key,
-                    send_summary=True
+                    now.date(),
+                    send_report=True
                 )
+
+            if now.weekday() == 0:
+                yesterday = (
+                    now.date()
+                    - timedelta(days=1)
+                )
+
+                previous_week_key, _, _ = (
+                    get_week_info(
+                        yesterday
+                    )
+                )
+
+                data = (
+                    get_guild_management(
+                        guild.id
+                    )
+                )
+
+                if (
+                    previous_week_key
+                    not in data[
+                        "weekly_processed"
+                    ]
+                ):
+                    await process_weekly_attendance(
+                        guild,
+                        yesterday,
+                        send_report=True
+                    )
 
         except Exception as e:
             print(
-                f"[클랜관리 자동 처리 오류] "
-                f"{guild.name}: {e}"
+                f"관리 자동 처리 오류 "
+                f"({guild.name}): {e}"
             )
 
 
-@clan_management_loop.before_loop
-async def before_clan_management_loop():
+@management_loop.before_loop
+async def before_management_loop():
     await bot.wait_until_ready()
 
 
@@ -1995,10 +2022,7 @@ class LadderInputModal(
             title=title
         )
 
-        self.ladder_view = (
-            ladder_view
-        )
-
+        self.ladder_view = ladder_view
         self.side = side
 
         self.items = discord.ui.TextInput(
@@ -2047,19 +2071,19 @@ class LadderInputModal(
             return
 
         if self.side == "left":
-            self.ladder_view.left_items = (
-                values
-            )
+            self.ladder_view.left_items = values
         else:
-            self.ladder_view.right_items = (
-                values
-            )
+            self.ladder_view.right_items = values
 
         await interaction.response.send_message(
             f"✅ {len(values)}개 항목이 저장되었습니다.",
             ephemeral=True
         )
 
+
+# ==================================================
+# 사다리 버튼
+# ==================================================
 
 class LadderView(
     discord.ui.View
@@ -2148,8 +2172,7 @@ class LadderView(
 
         if (
             not self.left_items
-            or
-            not self.right_items
+            or not self.right_items
         ):
             await interaction.response.send_message(
                 "⚠️ 왼쪽과 오른쪽 항목을 먼저 입력해주세요.",
@@ -2159,8 +2182,7 @@ class LadderView(
 
         if (
             len(self.left_items)
-            !=
-            len(self.right_items)
+            != len(self.right_items)
         ):
             await interaction.response.send_message(
                 f"⚠️ 항목 개수가 다릅니다.\n"
@@ -2209,8 +2231,8 @@ class LadderView(
 async def on_ready():
     await restore_participant_message()
 
-    if not clan_management_loop.is_running():
-        clan_management_loop.start()
+    if not management_loop.is_running():
+        management_loop.start()
 
     print(
         f"{bot.user} 로그인 완료!"
@@ -2224,7 +2246,7 @@ async def on_ready():
 
 
 # ==================================================
-# 투표 1인 1개 선택
+# 투표 1인 1개
 # ==================================================
 
 @bot.event
@@ -2247,13 +2269,10 @@ async def on_raw_reaction_add(
                 0
             )
         )
-    except:
+    except (ValueError, TypeError):
         return
 
-    if (
-        payload.message_id
-        != poll_message_id
-    ):
+    if payload.message_id != poll_message_id:
         return
 
     emoji = str(
@@ -2318,7 +2337,7 @@ async def on_raw_reaction_add(
             )
         except:
             pass
-            # ==================================================
+# ==================================================
 # 메시지 명령어
 # ==================================================
 
@@ -2339,30 +2358,25 @@ async def on_message(message):
     if not message.guild:
         return
 
-    content = (
-        message.content.strip()
-    )
+    content = message.content.strip()
 
     guild_manage = get_guild_management(
         message.guild.id
     )
 
     # ==================================================
-    # 미접사유 채널 자유 작성 자동 저장
+    # 미접사유 채널 자동 저장
     # ==================================================
 
-    reason_channel_id = guild_manage.get(
-        "absence_reason_channel_id"
+    reason_channel = get_reason_channel(
+        message.guild
     )
 
     if (
-        reason_channel_id
-        and
-        message.channel.id
-        == int(reason_channel_id)
+        reason_channel is not None
+        and message.channel.id == reason_channel.id
         and content
-        and content
-        not in [
+        and content not in [
             "미접사유채널설정",
             "도움"
         ]
@@ -2371,14 +2385,13 @@ async def on_message(message):
             message.guild
         )
 
-        is_clan_member = (
+        if (
             clan_members is not None
             and message.author in clan_members
-        )
-
-        if is_clan_member:
+        ):
             expires_date = parse_simple_date(
-                content
+                content,
+                future=True
             )
 
             guild_manage[
@@ -2403,14 +2416,15 @@ async def on_message(message):
                 notice = await message.channel.send(
                     f"✅ {message.author.display_name}님의 "
                     f"미접사유가 등록되었습니다.\n"
-                    f"📅 {expires_date.month}/{expires_date.day}까지 "
+                    f"📅 **{expires_date.month}/{expires_date.day}까지** "
                     f"관리 대상에서 제외됩니다."
                 )
+
             else:
                 notice = await message.channel.send(
                     f"✅ {message.author.display_name}님의 "
                     f"미접사유가 등록되었습니다.\n"
-                    f"⚠️ 종료 날짜를 찾지 못해 "
+                    f"⚠️ 종료 날짜가 없어 "
                     f"운영진 확인 전까지 경고 판정을 보류합니다."
                 )
 
@@ -2470,7 +2484,8 @@ async def on_message(message):
                 "`미참여`\n"
                 "→ 이번 주 대내 미참여 클랜원 확인\n\n"
                 "`주간출석`\n"
-                "→ 이번 주 전체 참여 / 미참여 현황 확인"
+                "→ 이번 주 전체 참여 / 미참여 현황 확인\n\n"
+                "※ `출석`을 입력해도 바로 경고가 생기지 않습니다."
             ),
             inline=False
         )
@@ -2479,19 +2494,29 @@ async def on_message(message):
             name="📋 운영진 · 클랜 관리",
             value=(
                 "`관리채널설정`\n"
-                "→ 현재 채널을 자동 관리현황/경고 채널로 저장\n\n"
+                "→ 현재 채널을 관리현황/자동알림 채널로 저장\n\n"
                 "`미접사유채널설정`\n"
-                "→ 현재 채널을 미접사유 작성 채널로 저장\n\n"
+                "→ 현재 채널을 미접사유 채널로 저장\n\n"
                 "`관리현황`\n"
-                "→ 현재 경고 / 제명 / 미접사유 현황 확인\n\n"
-                "`미접 닉네임 9/7`\n"
-                "→ 해당 클랜원의 마지막 접속일 등록\n\n"
-                "`복귀 닉네임`\n"
-                "→ 미접 기록 종료\n\n"
-                "`사유설정 닉네임 9/20`\n"
-                "→ 미접사유 종료 날짜를 운영진이 직접 설정\n\n"
-                "`사유종료 닉네임`\n"
-                "→ 해당 클랜원의 미접사유를 종료"
+                "→ 현재 관리 상태 확인\n"
+                "→ 확인만 하며 경고가 추가되지 않음\n\n"
+                "`미접 치 9/7`\n"
+                "→ 마지막 접속일 등록\n\n"
+                "`복귀 치`\n"
+                "→ 미접 상태 종료"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="📝 운영진 · 미접사유 관리",
+            value=(
+                "`사유설정 치 9/20`\n"
+                "→ 미접사유 종료 날짜 직접 설정\n\n"
+                "`사유종료 치`\n"
+                "→ 등록된 미접사유 종료\n\n"
+                "클랜원이 설정된 미접사유 채널에 "
+                "자유롭게 글을 쓰면 자동 저장됩니다."
             ),
             inline=False
         )
@@ -2499,30 +2524,16 @@ async def on_message(message):
         embed.add_field(
             name="⚠️ 경고 / 제명 기준",
             value=(
-                "• 주 1회 대내 미참여 + 유효한 미접사유 없음\n"
+                "• 주 1회 대내 미참여 + 미접사유 없음\n"
                 "→ 경고 1회\n\n"
-                "• 경고가 총 2회 이상 누적\n"
+                "• 경고 총 2회 이상\n"
                 "→ 제명 대상\n\n"
                 "• 미접사유 없이 7일 미접\n"
                 "→ 경고 1회\n\n"
                 "• 미접사유 없이 10일 미접\n"
-                "→ 경고 횟수와 관계없이 제명 대상\n\n"
+                "→ 바로 제명 대상\n\n"
                 "• 유효한 미접사유 기간에는 "
-                "대내 미참여 / 미접 경고 판정 제외"
-            ),
-            inline=False
-        )
-
-        embed.add_field(
-            name="📝 미접사유 사용법",
-            value=(
-                "설정된 미접사유 채널에 클랜원이 "
-                "자유롭게 사유를 작성하면 자동 저장됩니다.\n\n"
-                "예: `9/20까지 여행이라 접속 어렵습니다`\n"
-                "→ 9/20까지 관리 대상 제외\n\n"
-                "날짜가 없는 사유는 "
-                "운영진이 종료하거나 날짜를 설정할 때까지 "
-                "경고 판정을 보류합니다."
+                "대내/미접 판정에서 제외"
             ),
             inline=False
         )
@@ -2530,13 +2541,12 @@ async def on_message(message):
         embed.add_field(
             name="⏰ 자동 관리",
             value=(
-                "• 일요일 23:00 이후 주간 출석 최종 집계\n"
-                "• 봇이 꺼져 있었다면 다음 실행 시 "
-                "미처리 주차를 자동 확인\n"
-                "• 같은 주간 미참여 사유로 중복 경고 없음\n"
+                "• 매주 일요일 23:00 이후 최종 집계\n"
+                "• 일요일에 봇이 꺼져 있었다면 "
+                "월요일 실행 시 전 주 자동 처리\n"
+                "• 같은 주간 미참여로 경고 중복 없음\n"
                 "• 같은 미접 기록으로 7일 경고 중복 없음\n"
-                "• 미접 7일 / 10일 기준은 자동 확인\n"
-                "• 자동 알림은 `관리채널설정`한 채널로 전송"
+                "• 미접 7일 / 10일 자동 확인"
             ),
             inline=False
         )
@@ -2549,12 +2559,12 @@ async def on_message(message):
                 "`대내투표 2026-10-03 22:30`\n"
                 "→ 라플 / 스나 / 멀티 투표 생성\n\n"
                 "`투표수정 2026-10-03 23:00`\n"
-                "→ 기존 투표 날짜와 시간만 수정\n\n"
+                "→ 기존 투표 시간 수정\n\n"
                 "`투표초기화`\n"
                 "→ 기존 투표 참여 기록 초기화\n\n"
                 "`클린`\n"
-                "→ 현재 채널 채팅 및 모집 초기화\n"
-                "→ 출석/부별명단/클랜관리 기록은 유지"
+                "→ 현재 채널 및 모집 초기화\n"
+                "→ 출석/관리 기록은 유지"
             ),
             inline=False
         )
@@ -2565,11 +2575,10 @@ async def on_message(message):
                 "• 1~12번은 현재 부 참여\n"
                 "• 13번부터 다음 부 대기\n"
                 "• 다음 부 시작 시 대기자 자동 이동\n"
-                "• 12명 모집 완료 시 `운영진` 역할 자동 알림\n"
-                "• 이전 부 명단은 채팅에 그대로 유지\n"
+                "• 12명 모집 완료 시 운영진 자동 알림\n"
+                "• 이전 부 명단은 그대로 유지\n"
                 "• 각 부 최종 명단 자동 저장\n"
-                "• 출석은 월요일~일요일 기준\n"
-                "• 봇 재시작 후에도 모집/대기/출석 기록 유지"
+                "• 봇 재시작 후 모집/대기/출석 기록 유지"
             ),
             inline=False
         )
@@ -2591,9 +2600,11 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 설정할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
+
             return
 
         guild_manage[
@@ -2603,8 +2614,8 @@ async def on_message(message):
         save_management()
 
         await message.channel.send(
-            f"✅ 이 채널을 **관리현황 / 경고 자동 알림 채널**로 설정했습니다.\n"
-            f"<#{message.channel.id}>"
+            "✅ 이 채널을 "
+            "**관리현황 / 자동 경고 알림 채널**로 설정했습니다."
         )
 
         return
@@ -2620,9 +2631,11 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 설정할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
+
             return
 
         guild_manage[
@@ -2632,8 +2645,8 @@ async def on_message(message):
         save_management()
 
         await message.channel.send(
-            f"✅ 이 채널을 **미접사유 채널**로 설정했습니다.\n"
-            f"이제 클랜원이 여기에 자유롭게 사유를 적으면 자동 저장됩니다."
+            "✅ 이 채널을 **미접사유 채널**로 설정했습니다.\n"
+            "이제 클랜원이 이 채널에 사유를 적으면 자동 저장됩니다."
         )
 
         return
@@ -2649,14 +2662,12 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 확인할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
-            return
 
-        cleanup_expired_reasons(
-            message.guild.id
-        )
+            return
 
         await send_management_status(
             message.channel,
@@ -2678,9 +2689,11 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 사용할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
+
             return
 
         rest = content[
@@ -2696,9 +2709,11 @@ async def on_message(message):
                 "⚠️ 이렇게 입력해주세요.\n"
                 "`미접 치 9/7`"
             )
+
             await notice.delete(
                 delay=5
             )
+
             return
 
         name = rest[
@@ -2710,7 +2725,8 @@ async def on_message(message):
         ].strip()
 
         parsed_date = parse_simple_date(
-            date_text
+            date_text,
+            future=False
         )
 
         if not parsed_date:
@@ -2718,9 +2734,11 @@ async def on_message(message):
                 "⚠️ 날짜를 확인할 수 없습니다.\n"
                 "예: `미접 치 9/7`"
             )
+
             await notice.delete(
                 delay=5
             )
+
             return
 
         target, error, matches = (
@@ -2752,15 +2770,19 @@ async def on_message(message):
 
         save_management()
 
-        days = (
-            datetime.now(KST).date()
-            - parsed_date
-        ).days
+        days = max(
+            (
+                datetime.now(KST).date()
+                - parsed_date
+            ).days,
+            0
+        )
 
-        notice = await message.channel.send(
+        await message.channel.send(
             f"✅ **{target.display_name}** 미접 기록 저장\n"
-            f"마지막 접속일: **{parsed_date.strftime('%Y.%m.%d')}**\n"
-            f"현재 기준: **{max(days, 0)}일**"
+            f"마지막 접속일: "
+            f"**{parsed_date.strftime('%Y.%m.%d')}**\n"
+            f"현재 미접: **{days}일**"
         )
 
         await process_inactivity(
@@ -2783,9 +2805,11 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 사용할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
+
             return
 
         name = content[
@@ -2815,17 +2839,23 @@ async def on_message(message):
 
         if not record:
             notice = await message.channel.send(
-                f"⚠️ {target.display_name}님의 미접 기록이 없습니다."
+                f"⚠️ {target.display_name}님의 "
+                f"미접 기록이 없습니다."
             )
+
             await notice.delete(
                 delay=4
             )
+
             return
 
         record["active"] = False
-        record["returned_at"] = datetime.now(
-            KST
-        ).date().isoformat()
+
+        record["returned_at"] = (
+            datetime.now(
+                KST
+            ).date().isoformat()
+        )
 
         save_management()
 
@@ -2849,9 +2879,11 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 사용할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
+
             return
 
         rest = content[
@@ -2867,9 +2899,11 @@ async def on_message(message):
                 "⚠️ 이렇게 입력해주세요.\n"
                 "`사유설정 치 9/20`"
             )
+
             await notice.delete(
                 delay=5
             )
+
             return
 
         name = rest[
@@ -2881,7 +2915,8 @@ async def on_message(message):
         ].strip()
 
         parsed_date = parse_simple_date(
-            date_text
+            date_text,
+            future=True
         )
 
         if not parsed_date:
@@ -2889,9 +2924,11 @@ async def on_message(message):
                 "⚠️ 날짜를 확인할 수 없습니다.\n"
                 "예: `사유설정 치 9/20`"
             )
+
             await notice.delete(
                 delay=5
             )
+
             return
 
         target, error, matches = (
@@ -2909,7 +2946,7 @@ async def on_message(message):
         ):
             return
 
-        old = guild_manage[
+        old_record = guild_manage[
             "reasons"
         ].get(
             str(target.id),
@@ -2919,16 +2956,18 @@ async def on_message(message):
         guild_manage[
             "reasons"
         ][str(target.id)] = {
-            "text": old.get(
+            "text": old_record.get(
                 "text",
                 "운영진 수동 설정"
             ),
-            "expires": parsed_date.isoformat(),
+            "expires": (
+                parsed_date.isoformat()
+            ),
             "active": True,
-            "message_id": old.get(
+            "message_id": old_record.get(
                 "message_id"
             ),
-            "created_at": old.get(
+            "created_at": old_record.get(
                 "created_at",
                 datetime.now(
                     KST
@@ -2942,7 +2981,8 @@ async def on_message(message):
         save_management()
 
         await message.channel.send(
-            f"✅ **{target.display_name}** 미접사유 기간 설정 완료\n"
+            f"✅ **{target.display_name}** "
+            f"미접사유 기간 설정 완료\n"
             f"📅 **{parsed_date.month}/{parsed_date.day}까지**"
         )
 
@@ -2961,9 +3001,11 @@ async def on_message(message):
             notice = await message.channel.send(
                 "❌ 운영진만 사용할 수 있습니다."
             )
+
             await notice.delete(
                 delay=3
             )
+
             return
 
         name = content[
@@ -2985,30 +3027,37 @@ async def on_message(message):
         ):
             return
 
-        record = guild_manage[
+        reason_record = guild_manage[
             "reasons"
         ].get(
             str(target.id)
         )
 
-        if not record:
+        if not reason_record:
             notice = await message.channel.send(
-                f"⚠️ {target.display_name}님의 미접사유 기록이 없습니다."
+                f"⚠️ {target.display_name}님의 "
+                f"미접사유 기록이 없습니다."
             )
+
             await notice.delete(
                 delay=4
             )
+
             return
 
-        record["active"] = False
-        record["closed_at"] = datetime.now(
-            KST
-        ).date().isoformat()
+        reason_record["active"] = False
+
+        reason_record["closed_at"] = (
+            datetime.now(
+                KST
+            ).date().isoformat()
+        )
 
         save_management()
 
         await message.channel.send(
-            f"✅ **{target.display_name}** 미접사유를 종료했습니다."
+            f"✅ **{target.display_name}** "
+            f"미접사유를 종료했습니다."
         )
 
         return
@@ -3019,8 +3068,7 @@ async def on_message(message):
 
     if (
         content == "출석"
-        or
-        content.startswith(
+        or content.startswith(
             "출석 "
         )
     ):
@@ -3034,6 +3082,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         requested_part = None
@@ -3042,8 +3091,7 @@ async def on_message(message):
             requested_part = (
                 content[
                     len("출석 "):
-                ]
-                .strip()
+                ].strip()
             )
 
             if requested_part.endswith(
@@ -3065,6 +3113,7 @@ async def on_message(message):
                 await notice.delete(
                     delay=5
                 )
+
                 return
 
         if requested_part is None:
@@ -3076,20 +3125,17 @@ async def on_message(message):
                 await notice.delete(
                     delay=4
                 )
+
                 return
 
-            target_part = (
-                current_part
-            )
+            target_part = current_part
 
             target_users = (
                 participants.copy()
             )
 
         else:
-            target_part = (
-                requested_part
-            )
+            target_part = requested_part
 
             if (
                 target_part
@@ -3098,6 +3144,7 @@ async def on_message(message):
                 target_users = (
                     participants.copy()
                 )
+
             else:
                 target_users = (
                     get_saved_part_history(
@@ -3109,12 +3156,14 @@ async def on_message(message):
             if target_users is None:
                 notice = await message.channel.send(
                     f"⚠️ **{target_part}부 명단을 찾을 수 없습니다.**\n"
-                    f"이번 주에 저장된 {target_part}부 명단이 없습니다."
+                    f"이번 주에 저장된 "
+                    f"{target_part}부 명단이 없습니다."
                 )
 
                 await notice.delete(
                     delay=6
                 )
+
                 return
 
         if not target_users:
@@ -3125,6 +3174,7 @@ async def on_message(message):
             await notice.delete(
                 delay=4
             )
+
             return
 
         week_key, monday, sunday = (
@@ -3193,6 +3243,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         clan_members = get_clan_members(
@@ -3201,9 +3252,9 @@ async def on_message(message):
 
         if clan_members is None:
             await message.channel.send(
-                f"⚠️ `{CLAN_ROLE_NAME}` 역할을 찾을 수 없습니다.\n"
-                f"역할 이름이 정확히 `{CLAN_ROLE_NAME}`인지 확인해주세요."
+                f"⚠️ `{CLAN_ROLE_NAME}` 역할을 찾을 수 없습니다."
             )
+
             return
 
         (
@@ -3240,6 +3291,7 @@ async def on_message(message):
                 header
                 + "✅ 클랜원 전원이 이번 주 대내에 참여했습니다!"
             )
+
             return
 
         lines = [
@@ -3265,6 +3317,7 @@ async def on_message(message):
                     + f"\n\n❌ 미참여: "
                     f"**{len(absent_members)}명**"
                 )
+
             else:
                 await message.channel.send(
                     chunk
@@ -3287,6 +3340,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         clan_members = get_clan_members(
@@ -3297,6 +3351,7 @@ async def on_message(message):
             await message.channel.send(
                 f"⚠️ `{CLAN_ROLE_NAME}` 역할을 찾을 수 없습니다."
             )
+
             return
 
         (
@@ -3367,12 +3422,10 @@ async def on_message(message):
                 )
             ]
 
-            attended_chunks = split_lines(
-                attended_lines
-            )
-
             for index, chunk in enumerate(
-                attended_chunks
+                split_lines(
+                    attended_lines
+                )
             ):
                 title = (
                     "✅ **이번 주 참여 완료**\n\n"
@@ -3394,12 +3447,10 @@ async def on_message(message):
                 )
             ]
 
-            absent_chunks = split_lines(
-                absent_lines
-            )
-
             for index, chunk in enumerate(
-                absent_chunks
+                split_lines(
+                    absent_lines
+                )
             ):
                 title = (
                     "❌ **이번 주 미참여**\n\n"
@@ -3412,7 +3463,6 @@ async def on_message(message):
                 )
 
         return
-
     # ==================================================
     # 대내투표
     # ==================================================
@@ -3430,6 +3480,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         date_input = (
@@ -3453,6 +3504,7 @@ async def on_message(message):
             await notice.delete(
                 delay=7
             )
+
             return
 
         date_text = (
@@ -3500,6 +3552,7 @@ async def on_message(message):
         }
 
         save_poll_state()
+
         return
 
     # ==================================================
@@ -3519,6 +3572,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         if not poll_state:
@@ -3529,6 +3583,7 @@ async def on_message(message):
             await notice.delete(
                 delay=5
             )
+
             return
 
         date_input = (
@@ -3552,6 +3607,7 @@ async def on_message(message):
             await notice.delete(
                 delay=7
             )
+
             return
 
         try:
@@ -3594,6 +3650,7 @@ async def on_message(message):
             await notice.delete(
                 delay=5
             )
+
             return
 
         date_text = (
@@ -3628,6 +3685,7 @@ async def on_message(message):
         await notice.delete(
             delay=3
         )
+
         return
 
     # ==================================================
@@ -3645,6 +3703,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         if not poll_state:
@@ -3655,6 +3714,7 @@ async def on_message(message):
             await notice.delete(
                 delay=5
             )
+
             return
 
         try:
@@ -3697,6 +3757,7 @@ async def on_message(message):
             await notice.delete(
                 delay=5
             )
+
             return
 
         try:
@@ -3716,6 +3777,7 @@ async def on_message(message):
             await notice.delete(
                 delay=5
             )
+
             return
 
         await poll_message.add_reaction(
@@ -3737,6 +3799,7 @@ async def on_message(message):
         await notice.delete(
             delay=5
         )
+
         return
 
     # ==================================================
@@ -3754,6 +3817,7 @@ async def on_message(message):
             await notice.delete(
                 delay=3
             )
+
             return
 
         try:
@@ -3780,18 +3844,123 @@ async def on_message(message):
 
     # ==================================================
     # 1부 / 2부 / 3부 ...
-# ==================================================
+    # ==================================================
 
-if content.endswith(
-    "부"
-):
-    part_text = (
-        content[:-1].strip()
-    )
+    if content.endswith(
+        "부"
+    ):
+        part_text = (
+            content[:-1].strip()
+        )
 
-    if part_text.isdigit():
-        if not is_admin(
-            message.author
+        if part_text.isdigit():
+            if not is_admin(
+                message.author
+            ):
+                try:
+                    await message.delete()
+                except:
+                    pass
+
+                notice = await message.channel.send(
+                    "❌ 운영진만 대내 모집을 시작할 수 있습니다."
+                )
+
+                await notice.delete(
+                    delay=3
+                )
+
+                return
+
+            if current_part is not None:
+                save_current_part_history(
+                    message.guild
+                )
+
+            current_part = (
+                part_text
+            )
+
+            full_notification_sent = False
+            recruitment_was_full = False
+
+            participants = (
+                waiting.copy()
+            )
+
+            waiting.clear()
+
+            if (
+                len(participants)
+                > MAX_PARTICIPANTS
+            ):
+                waiting = (
+                    participants[
+                        MAX_PARTICIPANTS:
+                    ]
+                )
+
+                participants = (
+                    participants[
+                        :MAX_PARTICIPANTS
+                    ]
+                )
+
+            try:
+                await message.delete()
+            except:
+                pass
+
+            participant_message = (
+                await message.channel.send(
+                    make_participant_list()
+                )
+            )
+
+            save_current_part_history(
+                message.guild
+            )
+
+            save_recruitment_state(
+                message.guild
+            )
+
+            await check_full_status(
+                message.channel
+            )
+
+            return
+
+    # ==================================================
+    # 참여 / 참가
+    # ==================================================
+
+    if content in [
+        "참여",
+        "참가"
+    ]:
+        if current_part is None:
+            try:
+                await message.delete()
+            except:
+                pass
+
+            notice = await message.channel.send(
+                "⚠️ 아직 대내 모집이 시작되지 않았습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        user_id = (
+            message.author.id
+        )
+
+        if user_exists(
+            user_id
         ):
             try:
                 await message.delete()
@@ -3799,46 +3968,34 @@ if content.endswith(
                 pass
 
             notice = await message.channel.send(
-                "❌ 운영진만 대내 모집을 시작할 수 있습니다."
+                f"⚠️ {message.author.display_name}님은 "
+                f"이미 등록되어 있습니다."
             )
 
             await notice.delete(
                 delay=3
             )
+
             return
 
-        if current_part is not None:
-            save_current_part_history(
-                message.guild
-            )
-
-        current_part = (
-            part_text
-        )
-
-        full_notification_sent = False
-        recruitment_was_full = False
-
-        participants = (
-            waiting.copy()
-        )
-
-        waiting.clear()
+        user_data = {
+            "id":
+                user_id,
+            "name":
+                message.author.display_name
+        }
 
         if (
             len(participants)
-            > MAX_PARTICIPANTS
+            < MAX_PARTICIPANTS
         ):
-            waiting = (
-                participants[
-                    MAX_PARTICIPANTS:
-                ]
+            participants.append(
+                user_data
             )
 
-            participants = (
-                participants[
-                    :MAX_PARTICIPANTS
-                ]
+        else:
+            waiting.append(
+                user_data
             )
 
         try:
@@ -3846,10 +4003,8 @@ if content.endswith(
         except:
             pass
 
-        participant_message = (
-            await message.channel.send(
-                make_participant_list()
-            )
+        await update_participant_message(
+            message.channel
         )
 
         save_current_part_history(
@@ -3863,535 +4018,473 @@ if content.endswith(
         await check_full_status(
             message.channel
         )
+
         return
 
-# ==================================================
-# 참여 / 참가
-# ==================================================
+    # ==================================================
+    # 취소
+    # ==================================================
 
-if content in [
-    "참여",
-    "참가"
-]:
-    if current_part is None:
-        try:
-            await message.delete()
-        except:
-            pass
-
-        notice = await message.channel.send(
-            "⚠️ 아직 대내 모집이 시작되지 않았습니다."
+    if content == "취소":
+        user_id = (
+            message.author.id
         )
 
-        await notice.delete(
-            delay=3
-        )
-        return
+        removed = False
+        removed_from_main = False
 
-    user_id = (
-        message.author.id
-    )
-
-    if user_exists(
-        user_id
-    ):
-        try:
-            await message.delete()
-        except:
-            pass
-
-        notice = await message.channel.send(
-            f"⚠️ {message.author.display_name}님은 "
-            f"이미 등록되어 있습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    user_data = {
-        "id":
-            user_id,
-        "name":
+        removed_name = (
             message.author.display_name
-    }
-
-    if (
-        len(participants)
-        < MAX_PARTICIPANTS
-    ):
-        participants.append(
-            user_data
-        )
-    else:
-        waiting.append(
-            user_data
         )
 
-    try:
-        await message.delete()
-    except:
-        pass
-
-    await update_participant_message(
-        message.channel
-    )
-
-    save_current_part_history(
-        message.guild
-    )
-
-    save_recruitment_state(
-        message.guild
-    )
-
-    await check_full_status(
-        message.channel
-    )
-    return
-
-# ==================================================
-# 취소
-# ==================================================
-
-if content == "취소":
-    user_id = (
-        message.author.id
-    )
-
-    removed = False
-    removed_from_main = False
-
-    removed_name = (
-        message.author.display_name
-    )
-
-    for user in participants:
-        if user["id"] == user_id:
-            participants.remove(
-                user
-            )
-
-            removed = True
-            removed_from_main = True
-            break
-
-    if not removed:
-        for user in waiting:
+        for user in participants:
             if user["id"] == user_id:
-                waiting.remove(
+                participants.remove(
                     user
                 )
 
                 removed = True
+                removed_from_main = True
+
                 break
 
-    try:
-        await message.delete()
-    except:
-        pass
+        if not removed:
+            for user in waiting:
+                if user["id"] == user_id:
+                    waiting.remove(
+                        user
+                    )
 
-    if not removed:
-        notice = await message.channel.send(
-            f"⚠️ {message.author.display_name}님은 "
-            f"등록되어 있지 않습니다."
-        )
+                    removed = True
 
-        await notice.delete(
-            delay=3
-        )
-        return
+                    break
 
-    if (
-        removed_from_main
-        and waiting
-    ):
-        participants.append(
-            waiting.pop(0)
-        )
+        try:
+            await message.delete()
+        except:
+            pass
 
-    await update_participant_message(
-        message.channel
-    )
+        if not removed:
+            notice = await message.channel.send(
+                f"⚠️ {message.author.display_name}님은 "
+                f"등록되어 있지 않습니다."
+            )
 
-    save_current_part_history(
-        message.guild
-    )
+            await notice.delete(
+                delay=3
+            )
 
-    save_recruitment_state(
-        message.guild
-    )
+            return
 
-    if (
-        recruitment_was_full
-        and removed_from_main
-    ):
-        await message.channel.send(
-            f"⚠️ **{removed_name}님이 참여를 취소했습니다.**\n"
-            f"현재 인원: "
-            f"**{len(participants)}/{MAX_PARTICIPANTS}명**"
-        )
+        if (
+            removed_from_main
+            and waiting
+        ):
+            participants.append(
+                waiting.pop(0)
+            )
 
-        await check_full_status(
-            message.channel,
-            announce_drop=False
-        )
-
-    else:
-        await check_full_status(
+        await update_participant_message(
             message.channel
         )
 
-    return
-
-# ==================================================
-# 불참 닉네임
-# ==================================================
-
-if content.startswith(
-    "불참 "
-):
-    if not is_admin(
-        message.author
-    ):
-        notice = await message.channel.send(
-            "❌ 운영진만 사용할 수 있습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    name = (
-        content[3:].strip()
-    )
-
-    target, error, matches = (
-        find_member_by_name(
-            message.guild,
-            name
-        )
-    )
-
-    try:
-        await message.delete()
-    except:
-        pass
-
-    if await handle_search_error(
-        message.channel,
-        name,
-        error,
-        matches
-    ):
-        return
-
-    removed = False
-    removed_from_main = False
-
-    for user in participants:
-        if user["id"] == target.id:
-            participants.remove(
-                user
-            )
-
-            removed = True
-            removed_from_main = True
-            break
-
-    if not removed:
-        for user in waiting:
-            if user["id"] == target.id:
-                waiting.remove(
-                    user
-                )
-
-                removed = True
-                break
-
-    if not removed:
-        notice = await message.channel.send(
-            f"⚠️ {get_base_name(target)}님은 "
-            f"명단에 없습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    if (
-        removed_from_main
-        and waiting
-    ):
-        participants.append(
-            waiting.pop(0)
-        )
-
-    await update_participant_message(
-        message.channel
-    )
-
-    save_current_part_history(
-        message.guild
-    )
-
-    save_recruitment_state(
-        message.guild
-    )
-
-    await check_full_status(
-        message.channel
-    )
-    return
-
-# ==================================================
-# 추가 닉네임
-# ==================================================
-
-if content.startswith(
-    "추가 "
-):
-    if not is_admin(
-        message.author
-    ):
-        notice = await message.channel.send(
-            "❌ 운영진만 사용할 수 있습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    if current_part is None:
-        notice = await message.channel.send(
-            "⚠️ 먼저 `1부`, `2부` 등으로 "
-            "모집을 시작해주세요."
-        )
-
-        await notice.delete(
-            delay=4
-        )
-        return
-
-    name = (
-        content[3:].strip()
-    )
-
-    target, error, matches = (
-        find_member_by_name(
-            message.guild,
-            name
-        )
-    )
-
-    try:
-        await message.delete()
-    except:
-        pass
-
-    if await handle_search_error(
-        message.channel,
-        name,
-        error,
-        matches
-    ):
-        return
-
-    if user_exists(
-        target.id
-    ):
-        notice = await message.channel.send(
-            f"⚠️ {get_base_name(target)}님은 "
-            f"이미 등록되어 있습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    user_data = {
-        "id":
-            target.id,
-        "name":
-            target.display_name
-    }
-
-    if (
-        len(participants)
-        < MAX_PARTICIPANTS
-    ):
-        participants.append(
-            user_data
-        )
-    else:
-        waiting.append(
-            user_data
-        )
-
-    await update_participant_message(
-        message.channel
-    )
-
-    save_current_part_history(
-        message.guild
-    )
-
-    save_recruitment_state(
-        message.guild
-    )
-
-    await check_full_status(
-        message.channel
-    )
-    return
-
-# ==================================================
-# 집합
-# ==================================================
-
-if (
-    content == "집합"
-    or
-    content.startswith(
-        "집합 "
-    )
-):
-    if not is_admin(
-        message.author
-    ):
-        notice = await message.channel.send(
-            "❌ 운영진만 집합 알림을 보낼 수 있습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    if current_part is None:
-        notice = await message.channel.send(
-            "⚠️ 현재 모집 중인 대내가 없습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    if not participants:
-        notice = await message.channel.send(
-            "⚠️ 현재 참여자가 없습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    gather_time = (
-        content[2:].strip()
-    )
-
-    if not gather_time:
-        notice = await message.channel.send(
-            "⚠️ 시간을 같이 적어주세요.\n"
-            "예: `집합 20:30`"
-        )
-
-        await notice.delete(
-            delay=5
-        )
-        return
-
-    try:
-        await message.delete()
-    except:
-        pass
-
-    mentions = " ".join(
-        f"<@{user['id']}>"
-        for user in participants
-    )
-
-    mention_message = (
-        await message.channel.send(
-            mentions,
-            allowed_mentions=discord.AllowedMentions(
-                users=True,
-                roles=False,
-                everyone=False
-            )
-        )
-    )
-
-    await mention_message.delete(
-        delay=5
-    )
-
-    await message.channel.send(
-        f"🔔 **{current_part}부 대내**\n"
-        f"       **{gather_time}까지**\n"
-        f"       **대내 대기방에 집합해주세요!**"
-    )
-
-    return
-
-# ==================================================
-# 클린
-# ==================================================
-
-if content == "클린":
-    if not is_admin(
-        message.author
-    ):
-        notice = await message.channel.send(
-            "❌ 운영진만 사용할 수 있습니다."
-        )
-
-        await notice.delete(
-            delay=3
-        )
-        return
-
-    if current_part is not None:
         save_current_part_history(
             message.guild
         )
 
-    participants.clear()
-    waiting.clear()
-
-    current_part = None
-    participant_message = None
-
-    full_notification_sent = False
-    recruitment_was_full = False
-
-    clear_recruitment_state()
-
-    async for msg in (
-        message.channel.history(
-            limit=None
+        save_recruitment_state(
+            message.guild
         )
+
+        if (
+            recruitment_was_full
+            and removed_from_main
+        ):
+            await message.channel.send(
+                f"⚠️ **{removed_name}님이 참여를 취소했습니다.**\n"
+                f"현재 인원: "
+                f"**{len(participants)}/{MAX_PARTICIPANTS}명**"
+            )
+
+            await check_full_status(
+                message.channel,
+                announce_drop=False
+            )
+
+        else:
+            await check_full_status(
+                message.channel
+            )
+
+        return
+
+    # ==================================================
+    # 불참 닉네임
+    # ==================================================
+
+    if content.startswith(
+        "불참 "
     ):
-        if msg.pinned:
-            continue
+        if not is_admin(
+            message.author
+        ):
+            notice = await message.channel.send(
+                "❌ 운영진만 사용할 수 있습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        name = (
+            content[
+                len("불참 "):
+            ].strip()
+        )
+
+        target, error, matches = (
+            find_member_by_name(
+                message.guild,
+                name
+            )
+        )
 
         try:
-            await msg.delete()
+            await message.delete()
         except:
             pass
 
-    return
+        if await handle_search_error(
+            message.channel,
+            name,
+            error,
+            matches
+        ):
+            return
 
-await bot.process_commands(
-    message
-)
+        removed = False
+        removed_from_main = False
+
+        for user in participants:
+            if user["id"] == target.id:
+                participants.remove(
+                    user
+                )
+
+                removed = True
+                removed_from_main = True
+
+                break
+
+        if not removed:
+            for user in waiting:
+                if user["id"] == target.id:
+                    waiting.remove(
+                        user
+                    )
+
+                    removed = True
+
+                    break
+
+        if not removed:
+            notice = await message.channel.send(
+                f"⚠️ {get_base_name(target)}님은 "
+                f"명단에 없습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if (
+            removed_from_main
+            and waiting
+        ):
+            participants.append(
+                waiting.pop(0)
+            )
+
+        await update_participant_message(
+            message.channel
+        )
+
+        save_current_part_history(
+            message.guild
+        )
+
+        save_recruitment_state(
+            message.guild
+        )
+
+        await check_full_status(
+            message.channel
+        )
+
+        return
+
+    # ==================================================
+    # 추가 닉네임
+    # ==================================================
+
+    if content.startswith(
+        "추가 "
+    ):
+        if not is_admin(
+            message.author
+        ):
+            notice = await message.channel.send(
+                "❌ 운영진만 사용할 수 있습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if current_part is None:
+            notice = await message.channel.send(
+                "⚠️ 먼저 `1부`, `2부` 등으로 "
+                "모집을 시작해주세요."
+            )
+
+            await notice.delete(
+                delay=4
+            )
+
+            return
+
+        name = (
+            content[
+                len("추가 "):
+            ].strip()
+        )
+
+        target, error, matches = (
+            find_member_by_name(
+                message.guild,
+                name
+            )
+        )
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        if await handle_search_error(
+            message.channel,
+            name,
+            error,
+            matches
+        ):
+            return
+
+        if user_exists(
+            target.id
+        ):
+            notice = await message.channel.send(
+                f"⚠️ {get_base_name(target)}님은 "
+                f"이미 등록되어 있습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        user_data = {
+            "id":
+                target.id,
+            "name":
+                target.display_name
+        }
+
+        if (
+            len(participants)
+            < MAX_PARTICIPANTS
+        ):
+            participants.append(
+                user_data
+            )
+
+        else:
+            waiting.append(
+                user_data
+            )
+
+        await update_participant_message(
+            message.channel
+        )
+
+        save_current_part_history(
+            message.guild
+        )
+
+        save_recruitment_state(
+            message.guild
+        )
+
+        await check_full_status(
+            message.channel
+        )
+
+        return
+
+    # ==================================================
+    # 집합
+    # ==================================================
+
+    if (
+        content == "집합"
+        or content.startswith(
+            "집합 "
+        )
+    ):
+        if not is_admin(
+            message.author
+        ):
+            notice = await message.channel.send(
+                "❌ 운영진만 집합 알림을 보낼 수 있습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if current_part is None:
+            notice = await message.channel.send(
+                "⚠️ 현재 모집 중인 대내가 없습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if not participants:
+            notice = await message.channel.send(
+                "⚠️ 현재 참여자가 없습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        gather_time = (
+            content[
+                len("집합"):
+            ].strip()
+        )
+
+        if not gather_time:
+            notice = await message.channel.send(
+                "⚠️ 시간을 같이 적어주세요.\n"
+                "예: `집합 20:30`"
+            )
+
+            await notice.delete(
+                delay=5
+            )
+
+            return
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        mentions = " ".join(
+            f"<@{user['id']}>"
+            for user in participants
+        )
+
+        mention_message = (
+            await message.channel.send(
+                mentions,
+                allowed_mentions=discord.AllowedMentions(
+                    users=True,
+                    roles=False,
+                    everyone=False
+                )
+            )
+        )
+
+        await mention_message.delete(
+            delay=5
+        )
+
+        await message.channel.send(
+            f"🔔 **{current_part}부 대내**\n"
+            f"       **{gather_time}까지**\n"
+            f"       **대내 대기방에 집합해주세요!**"
+        )
+
+        return
+
+    # ==================================================
+    # 클린
+    # ==================================================
+
+    if content == "클린":
+        if not is_admin(
+            message.author
+        ):
+            notice = await message.channel.send(
+                "❌ 운영진만 사용할 수 있습니다."
+            )
+
+            await notice.delete(
+                delay=3
+            )
+
+            return
+
+        if current_part is not None:
+            save_current_part_history(
+                message.guild
+            )
+
+        participants.clear()
+        waiting.clear()
+
+        current_part = None
+        participant_message = None
+
+        full_notification_sent = False
+        recruitment_was_full = False
+
+        clear_recruitment_state()
+
+        async for msg in (
+            message.channel.history(
+                limit=None
+            )
+        ):
+            if msg.pinned:
+                continue
+
+            try:
+                await msg.delete()
+            except:
+                pass
+
+        return
+
+    await bot.process_commands(
+        message
+    )
 
 
 # ==================================================
