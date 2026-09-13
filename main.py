@@ -266,11 +266,17 @@ def get_admin_mentions(guild):
 
     mentions = []
 
-    for role_name in [
-        "운영자",
-        "부마스터",
-        "마스터"
-    ]:
+    def get_admin_mentions(guild):
+
+    role = discord.utils.get(
+        guild.roles,
+        name="운영진"
+    )
+
+    if role:
+        return role.mention
+
+    return "**운영진**"
 
         role = discord.utils.get(
             guild.roles,
