@@ -58,7 +58,7 @@ recruitment_was_full = False
 
 # ==================================================
 # 모집 상태 저장
-# Restart 후에도 현재 모집 유지
+# Restart 복구용
 # ==================================================
 
 RECRUITMENT_FILE = "recruitment_state.json"
@@ -106,8 +106,7 @@ def load_recruitment_state():
     )
 
     current_part = recruitment_state.get(
-        "current_part",
-        None
+        "current_part"
     )
 
     full_notification_sent = recruitment_state.get(
@@ -259,14 +258,11 @@ def is_admin(member):
 
 
 # ==================================================
-# 운영진 멘션
+# 모집 알림용 운영진 멘션
+# 운영진 역할만 멘션
 # ==================================================
 
 def get_admin_mentions(guild):
-
-    mentions = []
-
-    def get_admin_mentions(guild):
 
     role = discord.utils.get(
         guild.roles,
@@ -277,35 +273,6 @@ def get_admin_mentions(guild):
         return role.mention
 
     return "**운영진**"
-
-        role = discord.utils.get(
-            guild.roles,
-            name=role_name
-        )
-
-        if role:
-            mentions.append(
-                role.mention
-            )
-
-    if not mentions:
-
-        old_role = discord.utils.get(
-            guild.roles,
-            name="운영진"
-        )
-
-        if old_role:
-            mentions.append(
-                old_role.mention
-            )
-
-    if not mentions:
-        return "**운영진**"
-
-    return " ".join(
-        mentions
-    )
 
 
 # ==================================================
@@ -827,7 +794,7 @@ def make_participant_list():
 
 
 # ==================================================
-# Restart 후 기존 참여 명단 메시지 찾기
+# Restart 후 기존 참여 명단 메시지 복구
 # ==================================================
 
 async def restore_participant_message():
@@ -960,6 +927,7 @@ async def check_full_status(
         )
     )
 
+
     if (
         count == MAX_PARTICIPANTS
         and
@@ -970,7 +938,6 @@ async def check_full_status(
         recruitment_was_full = True
 
 
-        # 12명 모집 완료 상태 저장
         save_recruitment_state(
             channel.guild
         )
@@ -987,6 +954,7 @@ async def check_full_status(
             )
         )
 
+
     elif (
         count == MAX_PARTICIPANTS - 1
         and
@@ -996,7 +964,6 @@ async def check_full_status(
         full_notification_sent = False
 
 
-        # 모집 완료 상태 해제 저장
         save_recruitment_state(
             channel.guild
         )
@@ -1459,7 +1426,6 @@ class LadderView(
 @bot.event
 async def on_ready():
 
-    # Restart 후 기존 모집 메시지 연결
     await restore_participant_message()
 
     print(
@@ -1759,10 +1725,6 @@ async def on_message(message):
         requested_part = None
 
 
-        # ----------------------------------------------
-        # 출석 1부 형식이면 번호 추출
-        # ----------------------------------------------
-
         if content != "출석":
 
             requested_part = (
@@ -1797,11 +1759,6 @@ async def on_message(message):
                 return
 
 
-        # ----------------------------------------------
-        # 그냥 출석
-        # 현재 부 저장
-        # ----------------------------------------------
-
         if requested_part is None:
 
             if current_part is None:
@@ -1824,10 +1781,6 @@ async def on_message(message):
                 participants.copy()
             )
 
-
-        # ----------------------------------------------
-        # 출석 1부 / 출석 2부
-        # ----------------------------------------------
 
         else:
 
@@ -1879,10 +1832,6 @@ async def on_message(message):
 
             return
 
-
-        # ----------------------------------------------
-        # 이번 주 출석 저장
-        # ----------------------------------------------
 
         week_key, monday, sunday = (
             get_week_info()
@@ -2703,20 +2652,12 @@ async def on_message(message):
                 return
 
 
-            # ------------------------------------------
-            # 이전 부 최종 명단 저장
-            # ------------------------------------------
-
             if current_part is not None:
 
                 save_current_part_history(
                     message.guild
                 )
 
-
-            # ------------------------------------------
-            # 새 부로 변경
-            # ------------------------------------------
 
             current_part = (
                 part_text
@@ -2725,10 +2666,6 @@ async def on_message(message):
             full_notification_sent = False
             recruitment_was_full = False
 
-
-            # ------------------------------------------
-            # 이전 부 대기자 → 새 부 참가자
-            # ------------------------------------------
 
             participants = (
                 waiting.copy()
@@ -2761,10 +2698,6 @@ async def on_message(message):
                 pass
 
 
-            # ------------------------------------------
-            # 이전 명단 삭제하지 않고 새 명단 생성
-            # ------------------------------------------
-
             participant_message = (
                 await message.channel.send(
                     make_participant_list()
@@ -2772,13 +2705,11 @@ async def on_message(message):
             )
 
 
-            # 새 부 현재 상태 저장
             save_current_part_history(
                 message.guild
             )
 
 
-            # 모집 상태도 저장
             save_recruitment_state(
                 message.guild
             )
@@ -3281,7 +3212,8 @@ async def on_message(message):
 
     if (
         content == "집합"
-        or content.startswith(
+        or
+        content.startswith(
             "집합 "
         )
     ):
@@ -3405,7 +3337,6 @@ async def on_message(message):
             return
 
 
-        # 현재 부 최종 상태 한번 더 저장
         if current_part is not None:
 
             save_current_part_history(
@@ -3423,8 +3354,6 @@ async def on_message(message):
         recruitment_was_full = False
 
 
-        # 모집 진행 상태만 초기화
-        # attendance.json / part_history.json은 유지
         clear_recruitment_state()
 
 
