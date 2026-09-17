@@ -403,19 +403,24 @@ async def send_clan_role_button(
         color=discord.Color.red()
     )
 
-    try:
+        try:
         await channel.send(
             embed=embed,
             view=ClanRoleView()
         )
 
-        except discord.Forbidden:
+    except discord.Forbidden:
         print(
             f"{guild.name}: "
             f"클랜원 역할받기 채널에 "
             f"메시지를 보낼 권한이 없습니다."
         )
 
+    except discord.HTTPException as e:
+        print(
+            f"{guild.name}: "
+            f"클랜원 역할 버튼 생성 오류: {e}"
+        )
     except discord.HTTPException as e:
         print(
             f"{guild.name}: "
