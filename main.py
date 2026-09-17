@@ -3136,18 +3136,17 @@ async def on_message(
     # 3. 작성한 메시지 삭제
     #
     if (
-    message.channel.id
-    == MERCENARY_REGISTER_CHANNEL_ID
-):
-    handled = (
-        await handle_mercenary_registration(
-            message
+        message.channel.id
+        == MERCENARY_REGISTER_CHANNEL_ID
+    ):
+        handled = (
+            await handle_mercenary_registration(
+                message
+            )
         )
-    )
 
-    if handled:
-        return
-
+        if handled:
+            return
     guild_manage = (
         get_guild_management(
             message.guild.id
