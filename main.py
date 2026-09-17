@@ -403,7 +403,7 @@ async def send_clan_role_button(
         color=discord.Color.red()
     )
 
-        try:
+    try:
         await channel.send(
             embed=embed,
             view=ClanRoleView()
