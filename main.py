@@ -24,8 +24,9 @@ MAX_PARTICIPANTS = 12
 CLAN_ROLE_NAME = "클랜원"
 MERCENARY_ROLE_NAME = "용병"
 
-CLAN_ROLE_CHANNEL_NAME = "✅ㅣ역할받기"
-MERCENARY_REGISTER_CHANNEL_NAME = "✅ㅣ용병-등록"
+# 채널 ID
+CLAN_ROLE_CHANNEL_ID = 1517498787533164645
+MERCENARY_REGISTER_CHANNEL_ID = 1550069637755183164
 
 ADMIN_ROLE_NAMES = [
     "운영자",
@@ -356,16 +357,14 @@ class ClanRoleView(
 async def send_clan_role_button(
     guild
 ):
-    channel = discord.utils.get(
-        guild.text_channels,
-        name=CLAN_ROLE_CHANNEL_NAME
+    channel = guild.get_channel(
+        CLAN_ROLE_CHANNEL_ID
     )
 
     if channel is None:
         print(
             f"{guild.name}: "
-            f"{CLAN_ROLE_CHANNEL_NAME} "
-            f"채널을 찾을 수 없습니다."
+            f"클랜원 역할받기 채널을 찾을 수 없습니다."
         )
         return
 
@@ -410,10 +409,10 @@ async def send_clan_role_button(
             view=ClanRoleView()
         )
 
-    except discord.Forbidden:
+        except discord.Forbidden:
         print(
             f"{guild.name}: "
-            f"{CLAN_ROLE_CHANNEL_NAME} 채널에 "
+            f"클랜원 역할받기 채널에 "
             f"메시지를 보낼 권한이 없습니다."
         )
 
@@ -433,8 +432,15 @@ async def handle_mercenary_registration(
 ):
     # 지정한 용병 등록 채널에서만 작동
     if (
-        message.channel.name
-        != MERCENARY_REGISTER_CHANNEL_NAME
+        message.channel.id
+        != MERCENARY_REGISTER_CHANNEL_ID
+    ):
+        return False
+
+    # 운영진 / 부마스터 / 마스터가 작성한 글은
+    # 공지 등으로 간주하고 용병 등록 처리하지 않음
+    if is_admin(
+        message.author
     ):
         return False
 
@@ -3125,17 +3131,17 @@ async def on_message(
     # 3. 작성한 메시지 삭제
     #
     if (
-        message.channel.name
-        == MERCENARY_REGISTER_CHANNEL_NAME
-    ):
-        handled = (
-            await handle_mercenary_registration(
-                message
-            )
+    message.channel.id
+    == MERCENARY_REGISTER_CHANNEL_ID
+):
+    handled = (
+        await handle_mercenary_registration(
+            message
         )
+    )
 
-        if handled:
-            return
+    if handled:
+        return
 
     guild_manage = (
         get_guild_management(
@@ -3392,20 +3398,20 @@ async def on_message(
         )
 
         embed.add_field(
-            name="🪖 용병 / 클랜원 자동 역할",
-            value=(
-                f"`{MERCENARY_REGISTER_CHANNEL_NAME}`\n"
-                "→ `본인닉네임 / 용병 / 지인닉네임` "
-                "형식으로 입력\n"
-                "→ 닉네임 변경 + 용병 역할 자동 지급\n\n"
-                f"`{CLAN_ROLE_CHANNEL_NAME}`\n"
-                "→ 본인인증 및 가입 완료 후 "
-                "`클랜원 역할 받기` 버튼 사용\n"
-                "→ 용병 역할이 있다면 자동 제거 후 "
-                "클랜원 역할 지급"
-            ),
-            inline=False
-        )
+    name="🪖 용병 / 클랜원 자동 역할",
+    value=(
+        "`✅ㅣ용병-등록`\n"
+        "→ `본인닉네임 / 용병 / 지인닉네임` "
+        "형식으로 입력\n"
+        "→ 닉네임 변경 + 용병 역할 자동 지급\n\n"
+        "`✅ㅣ역할받기`\n"
+        "→ 본인인증 및 가입 완료 후 "
+        "`클랜원 역할 받기` 버튼 사용\n"
+        "→ 용병 역할이 있다면 자동 제거 후 "
+        "클랜원 역할 지급"
+    ),
+    inline=False
+)
 
         await message.channel.send(
             embed=embed
