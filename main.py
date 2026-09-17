@@ -25,6 +25,8 @@ CLAN_ROLE_NAME = "클랜원"
 MERCENARY_ROLE_NAME = "용병"
 
 # 채널 ID
+GUILD_ID = 898149239538982932
+
 CLAN_ROLE_CHANNEL_ID = 1517498787533164645
 MERCENARY_REGISTER_CHANNEL_ID = 1550069637755183164
 
@@ -2939,9 +2941,16 @@ async def on_ready():
         ClanRoleView()
     )
 
-    # 역할받기 채널에 버튼 메시지가 없을 경우
-    # 자동 생성
-    for guild in bot.guilds:
+    # 역할받기 버튼은 전사 서버에서만 준비
+    guild = bot.get_guild(
+        GUILD_ID
+    )
+
+    if guild is None:
+        print(
+            "전사 서버를 찾을 수 없습니다."
+        )
+    else:
         try:
             await send_clan_role_button(
                 guild
